@@ -155,8 +155,6 @@ class ReliabilityLayer:
 				out.write(c_ushort(len(data) * 8), compressed=True)
 				out.write_aligned_bytes(data)
 
-				out = bytes(out)
-
 				assert len(out) < 1492 # MTU, need to decide what to do when this happens
 				# It might be that this assert is not needed, but i'll have to test that when i actually send a large packet
 				self._transport.sendto(out, self._address)
@@ -173,5 +171,5 @@ class ReliabilityLayer:
 				out.write(c_uint(remote_system_time))
 				out.write(self._acks.serialize())
 				self._acks.clear()
-				self._transport.sendto(bytes(out), self._address)
+				self._transport.sendto(out, self._address)
 			yield from asyncio.sleep(interval)
