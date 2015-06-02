@@ -192,7 +192,7 @@ class BitStream(bytearray):
 					self._read_offset += 8
 				offset += 1
 				number_of_bits = 0
-		return bytes(output)
+		return output
 
 	def _read_compressed(self, number_of_bytes):
 		current_byte = number_of_bytes - 1
@@ -217,3 +217,7 @@ class BitStream(bytearray):
 			self._read_offset += 8 - self._read_offset % 8
 
 		return self.read_bits(number_of_bytes * 8)
+
+	def all_read(self):
+		# This is not accurate to the bit, just to the byte
+		return math.ceil(self._read_offset / 8) == len(self)

@@ -27,8 +27,10 @@ class Peer:
 		self._raknet_packet_handlers = {}
 		self.not_console_logged_packets = set(("InternalPing", "ConnectedPong"))
 		self.file_logged_packets = set()
+		asyncio.async(self._check_connections_loop())
 
 		self.register_for_raknet_packet(MsgID.ConnectionRequest, self.on_connection_request)
+		self.register_for_raknet_packet(MsgID.ConnectionRequestAccepted, self.on_connection_request_accepted)
 		self.register_for_raknet_packet(MsgID.NewIncomingConnection, self.on_new_connection)
 		self.register_for_raknet_packet(MsgID.InternalPing, self.on_internal_ping)
 		self.register_for_raknet_packet(MsgID.DisconnectionNotification, self.on_disconnect_or_connection_lost)
@@ -53,9 +55,9 @@ class Peer:
 		if len(data) <= 2: # If the length is leq 2 then this is a raw datagram
 			packet_id = data[0]
 			if packet_id == MsgID.OpenConnectionRequest:
-				self.on_open_connection_request(data, address)
+				self.on_open_connection_request(address)
 			elif packet_id == MsgID.OpenConnectionReply:
-				self.on_open_connection_reply(data, address)
+				self.on_open_connection_reply(address)
 		else:
 			if address in self._connected:
 				for packet in self._connected[address].handle_datagram(data):
@@ -74,6 +76,7 @@ class Peer:
 
 		loop = asyncio.get_event_loop()
 		self._transport, protocol = yield from loop.create_datagram_endpoint(lambda: self, remote_addr=address)
+		self._address = self._transport.get_extra_info("sockname")
 		self.send(bytes((MsgID.OpenConnectionRequest, 0)), address, raw=True)
 
 	def close_connection(self, address):
@@ -84,7 +87,7 @@ class Peer:
 			print("Tried closing connection to someone we are not connected to! (Todo: Implement the router)")
 
 	def send(self, data, address=None, broadcast=False, reliability=PacketReliability.ReliableOrdered, raw=False):
-		assert reliability not in (PacketReliability.UnreliableSequenced, PacketReliability.ReliableSequenced) # If you need these, tell me
+		assert reliability != PacketReliability.ReliableSequenced # If you need this one, tell me
 		if broadcast:
 			assert address is None
 			for recipient in self._connected:
@@ -96,7 +99,7 @@ class Peer:
 		if raw:
 			self._transport.sendto(data, address)
 			return
-		self._connected[address]._sends.append((data, reliability))
+		self._connected[address].send(data, reliability)
 
 	# Overridable hooks
 
@@ -146,12 +149,13 @@ class Peer:
 
 		for handler_tuple in origin_handlers:
 			handler, origin_filter = handler_tuple
+			stream = BitStream(data)
 			if isinstance(handler, asyncio.Future):
-				handler.set_result((data, address))
+				handler.set_result((stream, address))
 				# Futures are one-time-use only
 				handlers.remove(handler_tuple)
 			else:
-				handler(data, address)
+				handler(stream, address)
 
 	def register_for_raknet_packet(self, *args, **kwargs):
 		return self._register(self._raknet_packet_handlers, *args, **kwargs)
@@ -173,9 +177,16 @@ class Peer:
 			return callback
 		handlers.append((callback, origin))
 
+	@asyncio.coroutine
+	def _check_connections_loop(self):
+		while True:
+			for address, layer in self._connected.copy().items():
+				if layer._resends and layer.last_ack_time < time.time() - 1000:#10:
+					self.close_connection(address)
+			yield from asyncio.sleep(10)
 	# Packet callbacks
 
-	def on_open_connection_request(self, data, address):
+	def on_open_connection_request(self, address):
 		if len(self._connected) < self.max_incoming_connections:
 			if address not in self._connected:
 				self._connected[address] = ReliabilityLayer(self._transport, address)
@@ -183,14 +194,14 @@ class Peer:
 		else:
 			raise NotImplementedError
 
-	def on_open_connection_reply(self, data, address):
+	def on_open_connection_reply(self, address):
 		if len(self._connected) < self.max_incoming_connections:
 			if address not in self._connected:
 				self._connected[address] = ReliabilityLayer(self._transport, address)
 			response = BitStream()
 			response.write(c_ubyte(MsgID.ConnectionRequest))
 			response.write(self._outgoing_passwords[address])
-			self.send(response, address)
+			self.send(response, address, reliability=PacketReliability.Reliable)
 		else:
 			raise NotImplementedError
 
@@ -208,6 +219,15 @@ class Peer:
 		else:
 			raise NotImplementedError
 
+	def on_connection_request_accepted(self, data, address):
+		response = BitStream()
+		response.write(c_ubyte(MsgID.NewIncomingConnection))
+		response.write(socket.inet_aton(address[0]))
+		response.write(c_ushort(address[1]))
+		response.write(socket.inet_aton(self._address[0]))
+		response.write(c_ushort(self._address[1]))
+		self.send(response, address, reliability=PacketReliability.Reliable)
+
 	def on_new_connection(self, data, address):
 		print("New Connection from", address)
 
@@ -222,6 +242,7 @@ class Peer:
 
 	def on_disconnect_or_connection_lost(self, data, address):
 		print("Disconnect/Connection lost to %s" % str(address))
+		self._connected[address].stop = True
 		del self._connected[address]
 		# Remove any registered handlers associated with the disconnected address
 		self._remove_handlers(address, self._raknet_packet_handlers)

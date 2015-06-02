@@ -4,11 +4,9 @@ Python implementation of RakNet 3.25. This is not aimed to be a complete port of
 
 * Encryption
 
-* Sequenced sending
+* ReliableSequenced sending / receiving
 
-* ReliableSequenced receiving
-
-* Split packets / Packets longer than 1500 bytes
+* Split packet receiving
 
 * Grouped sending
 
