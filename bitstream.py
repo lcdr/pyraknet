@@ -158,12 +158,12 @@ class BitStream(bytearray):
 		else:
 			# Fixed-length string
 			byte_str = bytearray()
-			while True:
+			while len(byte_str) < allocated_length:
 				char = self.read_bits(char_size * 8)
 				if sum(char) == 0:
+					self.skip_read(allocated_length - len(byte_str) - char_size)
 					break
 				byte_str += char
-			self.skip_read(allocated_length - len(byte_str) - char_size)
 
 		return byte_str.decode(encoding)
 
