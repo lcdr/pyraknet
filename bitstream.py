@@ -173,6 +173,11 @@ class BitStream(bytearray):
 		return bit
 
 	def read_bits(self, number_of_bits):
+		if number_of_bits % 8 == 0 and self._read_offset % 8 == 0: # optimization for no bitshifts
+			output = self[self._read_offset//8:self._read_offset//8+number_of_bits//8]
+			self._read_offset += number_of_bits
+			return output
+
 		output = bytearray(math.ceil(number_of_bits / 8))
 		offset = 0
 		while number_of_bits > 0:
