@@ -5,7 +5,7 @@ from .bitstream import BitStream, c_bit
 from .msgIDs import MsgID
 
 class ReplicaManager:
-	def __init__(self, is_server):
+	def __init__(self):
 		self.participants = set()
 		self.network_ids = {}
 		self.objects = {}
