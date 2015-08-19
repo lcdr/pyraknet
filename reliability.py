@@ -29,7 +29,7 @@ class ReliabilityLayer:
 		self._sequenced_read_index = 0
 		self._ordered_write_index = 0
 		self._ordered_read_index = 0
-		self._last_received = [-1] * 10
+		self._last_received = [-1] * 50
 		self._out_of_order_packets = {} # for ReliableOrdered
 		self._sends = []
 		self._resends = OrderedDict()
@@ -50,7 +50,8 @@ class ReliabilityLayer:
 			assert data.read(c_uint) == 0 # unused
 			acks = rangelist.RangeList(data)
 			for message_number in acks.ranges():
-				del self._resends[message_number]
+				if message_number in self._resends:
+					del self._resends[message_number]
 			self.last_ack_time = time.time()
 		if data.all_read():
 			return True
@@ -88,9 +89,8 @@ class ReliabilityLayer:
 					self._sequenced_read_index = ordering_index + 1
 				else:
 					# Since we have already filtered duplicate packets, this should never happen
-					# unfortunately with asyncio there is no guarantee that raising an exception will actually stop the program so we stop it ourselves
-					print("Received unfiltered sequenced duplicate!")
-					raise SystemExit
+					print("Received unfiltered sequenced duplicate, increase size of _last_received!")
+					continue
 			elif reliability in (PacketReliability.Reliable, PacketReliability.ReliableOrdered):
 				self._acks.append(message_number)
 				if reliability == PacketReliability.ReliableOrdered:
@@ -103,9 +103,8 @@ class ReliabilityLayer:
 							ord += 1
 					elif ordering_index < self._ordered_read_index:
 						# Since we have already filtered duplicate packets, this should never happen
-						# unfortunately with asyncio there is no guarantee that raising an exception will actually stop the program so we stop it ourselves
-						print("Received unfiltered ordered duplicate!")
-						raise SystemExit
+						print("Received unfiltered ordered duplicate, increase size of _last_received!")
+						continue
 					else:
 						# Packet arrived too early, we're still waiting for a previous packet
 						# Add this one to a queue so we can process it later
