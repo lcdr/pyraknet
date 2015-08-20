@@ -77,6 +77,9 @@ class ReliabilityLayer:
 			length = data.read(c_ushort, compressed=True)
 			packet_data = data.read_aligned_bytes(math.ceil(length / 8))
 
+			if reliability in (PacketReliability.Reliable, PacketReliability.ReliableOrdered):
+				self._acks.append(message_number)
+
 			if message_number not in self._last_received:
 				del self._last_received[0]
 				self._last_received.append(message_number)
@@ -91,24 +94,22 @@ class ReliabilityLayer:
 					# Since we have already filtered duplicate packets, this should never happen
 					print("Received unfiltered sequenced duplicate, increase size of _last_received!")
 					continue
-			elif reliability in (PacketReliability.Reliable, PacketReliability.ReliableOrdered):
-				self._acks.append(message_number)
-				if reliability == PacketReliability.ReliableOrdered:
-					if ordering_index == self._ordered_read_index:
+			elif reliability == PacketReliability.ReliableOrdered:
+				if ordering_index == self._ordered_read_index:
+					self._ordered_read_index += 1
+					ord = ordering_index+1
+					while ord in self._out_of_order_packets:
 						self._ordered_read_index += 1
-						ord = ordering_index+1
-						while ord in self._out_of_order_packets:
-							self._ordered_read_index += 1
-							yield self._out_of_order_packets.pop(ord)
-							ord += 1
-					elif ordering_index < self._ordered_read_index:
-						# Since we have already filtered duplicate packets, this should never happen
-						print("Received unfiltered ordered duplicate, increase size of _last_received!")
-						continue
-					else:
-						# Packet arrived too early, we're still waiting for a previous packet
-						# Add this one to a queue so we can process it later
-						self._out_of_order_packets[ordering_index] = packet_data
+						yield self._out_of_order_packets.pop(ord)
+						ord += 1
+				elif ordering_index < self._ordered_read_index:
+					# Since we have already filtered duplicate packets, this should never happen
+					print("Received unfiltered ordered duplicate, increase size of _last_received!")
+					continue
+				else:
+					# Packet arrived too early, we're still waiting for a previous packet
+					# Add this one to a queue so we can process it later
+					self._out_of_order_packets[ordering_index] = packet_data
 			yield packet_data
 
 	def send(self, data, reliability):
