@@ -18,7 +18,7 @@ class BitStream(bytearray):
 
 	def write(self, arg, compressed=False, char_size:"for strings"=2, allocated_length:"for fixed-length strings"=None, length_type:"for variable-length strings"=None):
 		if isinstance(arg, BitStream):
-			self.write_bits(bytes(arg), arg._write_offset)
+			self.write_bits(bytes(arg), arg._write_offset, align_right=False)
 			return
 		if isinstance(arg, c_bit):
 			self._write_bit(arg.value)
@@ -62,14 +62,14 @@ class BitStream(bytearray):
 
 		self._write_offset += 1
 
-	def write_bits(self, byte_arg, number_of_bits=None):
+	def write_bits(self, byte_arg, number_of_bits=None, align_right=True):
 		if number_of_bits is None:
 			number_of_bits = len(byte_arg) * 8
 		self._alloc_bits(number_of_bits)
 		offset = 0
 		while number_of_bits > 0:
 			data_byte = byte_arg[offset]
-			if number_of_bits < 8: # In the case of a partial byte, the bits are aligned from the right (bit 0) rather than the left (as in the normal internal representation)
+			if number_of_bits < 8 and align_right: # In the case of a partial byte, the bits are aligned from the right (bit 0) rather than the left (as in the normal internal representation)
 				data_byte = data_byte << (8 - number_of_bits) & 0xff # Shift left to get the bits on the left, as in our internal representation
 			if self._write_offset % 8 == 0:
 				self[self._write_offset//8] = data_byte
