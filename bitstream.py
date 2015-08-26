@@ -126,21 +126,23 @@ class BitStream(bytearray):
 	def skip_read(self, byte_length):
 		self._read_offset += byte_length * 8
 
-	def read(self, arg_type, compressed=False, length:"for bytes"=None, char_size:"for strings"=2, allocated_length:"for fixed-length strings"=None, length_type:"for variable-length strings"=None):
-		if issubclass(arg_type, c_bit):
-			return self._read_bit()
-		if issubclass(arg_type, bytes):
-			return self.read_bits(length * 8)
-		elif issubclass(arg_type, str):
-			return self._read_str(char_size, allocated_length, length_type)
-		elif issubclass(arg_type, _SimpleCData):
+	def read(self, arg_type, compressed=False, length:"for BitStream (in bits) and for bytes (in bytes)"=None, char_size:"for strings"=2, allocated_length:"for fixed-length strings"=None, length_type:"for variable-length strings"=None):
+		if issubclass(arg_type, _SimpleCData):
 			if compressed:
 				if issubclass(arg_type, (c_float, c_double)):
 					raise NotImplementedError
 				read = self._read_compressed(sizeof(arg_type))
 			else:
 				read = self.read_bits(sizeof(arg_type) * 8)
-			return arg_type.from_buffer_copy(read).value
+			return arg_type.from_buffer(read).value
+		if issubclass(arg_type, c_bit):
+			return self._read_bit()
+		if issubclass(arg_type, str):
+			return self._read_str(char_size, allocated_length, length_type)
+		if issubclass(arg_type, bytes):
+			return self.read_bits(length * 8)
+		if issubclass(arg_type, BitStream):
+			return BitStream(self.read_bits(length, align_right=False))
 		raise TypeError(arg_type)
 
 	def _read_str(self, char_size, allocated_length, length_type):
@@ -172,8 +174,8 @@ class BitStream(bytearray):
 		self._read_offset += 1
 		return bit
 
-	def read_bits(self, number_of_bits):
-		if number_of_bits % 8 == 0 and self._read_offset % 8 == 0: # optimization for no bitshifts
+	def read_bits(self, number_of_bits, align_right=True):
+		if self._read_offset % 8 == 0 and number_of_bits % 8 == 0: # optimization for no bitshifts
 			output = self[self._read_offset//8:self._read_offset//8+number_of_bits//8]
 			self._read_offset += number_of_bits
 			return output
@@ -182,21 +184,18 @@ class BitStream(bytearray):
 		offset = 0
 		while number_of_bits > 0:
 			output[offset] |= (self[self._read_offset//8] << self._read_offset % 8) & 0xff # First half
-			if self._read_offset % 8 > 0 and number_of_bits > 8 - self._read_offset % 8: # If we have a second half, we didn't read enough bytes in the first half
+			if self._read_offset % 8 != 0 and number_of_bits > 8 - self._read_offset % 8: # If we have a second half, we didn't read enough bytes in the first half
 				output[offset] |= self[self._read_offset//8 + 1] >> 8 - self._read_offset % 8 # Second half (overlaps byte boundary)
+			self._read_offset += 8
 			if number_of_bits >= 8:
 				number_of_bits -= 8
-				self._read_offset += 8
-				offset += 1
 			else:
-				neg = number_of_bits - 8
-				if neg < 0: # Reading a partial byte for the last byte, shift right so the data is aligned on the right
-					output[offset] >>= -neg
-					self._read_offset += 8 + neg
-				else:
-					self._read_offset += 8
-				offset += 1
-				number_of_bits = 0
+				number_of_unread_bits = 8 - number_of_bits
+				if align_right:
+					output[offset] >>= number_of_unread_bits
+				self._read_offset -= number_of_unread_bits
+				break
+			offset += 1
 		return output
 
 	def _read_compressed(self, number_of_bytes):
