@@ -206,7 +206,7 @@ class BitStream(bytearray):
 				current_byte -= 1
 			else:
 				# Read the rest of the bytes
-				return bytes(number_of_bytes - current_byte - 1) + self.read_bits((current_byte + 1) * 8)
+				return bytearray(number_of_bytes - current_byte - 1) + self.read_bits((current_byte + 1) * 8)
 
 		# All but the first bytes are 0. If the upper half of the last byte is a 0 (positive) or 16 (negative) then what we read will be a 1 and the remaining 4 bits.
 		# Otherwise we read a 0 and the 8 bits
@@ -214,7 +214,7 @@ class BitStream(bytearray):
 			bits = 4
 		else:
 			bits = 8
-		return self.read_bits(bits) + bytes(number_of_bytes - current_byte - 1)
+		return self.read_bits(bits) + bytearray(number_of_bytes - current_byte - 1)
 
 	def read_aligned_bytes(self, number_of_bytes):
 		if self._read_offset % 8 != 0:
