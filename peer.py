@@ -89,8 +89,10 @@ class Peer:
 	def send(self, data, address=None, broadcast=False, reliability=PacketReliability.ReliableOrdered, raw=False):
 		assert reliability != PacketReliability.ReliableSequenced # If you need this one, tell me
 		if broadcast:
-			assert address is None
-			for recipient in self._connected:
+			recipients = self._connected.copy()
+			if address is not None:
+				del recipients[address]
+			for recipient in recipients:
 				self.send(data, recipient, False, reliability, raw)
 			return
 		if address is None:
