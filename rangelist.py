@@ -1,6 +1,4 @@
-from ctypes import c_uint, c_ushort
-
-from .bitstream import BitStream, c_bit
+from .bitstream import BitStream, c_bit, c_uint, c_ushort
 
 class RangeList(list):
 	"""

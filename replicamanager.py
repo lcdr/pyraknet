@@ -1,7 +1,6 @@
 import asyncio
-from ctypes import c_ubyte, c_ushort
 
-from .bitstream import BitStream, c_bit
+from .bitstream import BitStream, c_bit, c_ubyte, c_ushort
 from .msgIDs import MsgID
 
 class ReplicaManager:

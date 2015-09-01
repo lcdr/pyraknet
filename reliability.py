@@ -3,10 +3,9 @@ import asyncio
 import math
 import time
 from collections import OrderedDict
-from ctypes import c_uint, c_ushort
 
 from . import rangelist
-from .bitstream import BitStream, c_bit
+from .bitstream import BitStream, c_bit, c_uint, c_ushort
 
 class PacketReliability:
 	Unreliable = 0

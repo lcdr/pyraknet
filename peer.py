@@ -1,9 +1,8 @@
 import asyncio
 import socket
 import time
-from ctypes import c_ubyte, c_uint, c_ushort
 
-from .bitstream import BitStream
+from .bitstream import BitStream, c_ubyte, c_uint, c_ushort
 from .reliability import PacketReliability, ReliabilityLayer
 from .msgIDs import MsgID
 

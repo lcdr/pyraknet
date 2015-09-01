@@ -1,12 +1,36 @@
 import math
-from ctypes import _SimpleCData, c_double, c_float, sizeof
+import struct
+
+class Struct(struct.Struct):
+	# cast-like syntax for packing
+	def __call__(self, value):
+		return self.pack(value)
+
+c_bool = Struct("?")
+c_float = Struct("f")
+c_double = Struct("d")
+c_int = Struct("i")
+c_uint = Struct("I")
+
+c_byte = Struct("b")
+c_ubyte = Struct("B")
+c_short = Struct("h")
+c_ushort = Struct("H")
+c_long = Struct("l")
+c_ulong = Struct("L")
+c_longlong = Struct("q")
+c_ulonglong = Struct("Q")
+
+c_int8 = c_byte
+c_uint8 = c_ubyte
+c_int16 = c_short
+c_uint16 = c_ushort
+c_int32 = c_long
+c_uint32 = c_ulong
+c_int64 = c_longlong
+c_uint64 = c_ulonglong
 
 class c_bit:
-	"""
-	Extension to ctypes' typical c_something types to accept bits.
-	Just using booleans might be error-prone when you want the boolean to be serialized as c_ubyte or something.
-	(Yes, I know C/C++ doesn't have a bit type)
-	"""
 	def __init__(self, boolean):
 		self.value = boolean
 
@@ -26,12 +50,13 @@ class BitStream(bytearray):
 		if isinstance(arg, str):
 			self._write_str(arg, char_size, allocated_length, length_type)
 			return
-		byte_arg = bytes(arg)
+		if not isinstance(arg, (bytes, bytearray)):
+			raise TypeError(arg)
 
 		if compressed:
-			self._write_compressed(byte_arg)
+			self._write_compressed(arg)
 		else:
-			self.write_bits(byte_arg)
+			self.write_bits(arg)
 
 	def _write_str(self, str_, char_size, allocated_length, length_type):
 		# possibly include default encoded lengths for non-variable-length strings (seem to be 33 for string and 66 for wstring)
@@ -127,14 +152,14 @@ class BitStream(bytearray):
 		self._read_offset += byte_length * 8
 
 	def read(self, arg_type, compressed=False, length:"for BitStream (in bits) and for bytes (in bytes)"=None, char_size:"for strings"=2, allocated_length:"for fixed-length strings"=None, length_type:"for variable-length strings"=None):
-		if issubclass(arg_type, _SimpleCData):
+		if isinstance(arg_type, struct.Struct):
 			if compressed:
-				if issubclass(arg_type, (c_float, c_double)):
+				if arg_type in (c_float, c_double):
 					raise NotImplementedError
-				read = self._read_compressed(sizeof(arg_type))
+				read = self._read_compressed(arg_type.size)
 			else:
-				read = self.read_bits(sizeof(arg_type) * 8)
-			return arg_type.from_buffer(read).value
+				read = self.read_bits(arg_type.size * 8)
+			return arg_type.unpack(read)[0]
 		if issubclass(arg_type, c_bit):
 			return self._read_bit()
 		if issubclass(arg_type, str):
