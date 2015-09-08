@@ -23,18 +23,18 @@ class Peer:
 		self.max_incoming_connections = max_incoming_connections
 		self._connected = {}
 		self._outgoing_passwords = {}
-		self._raknet_packet_handlers = {}
+		self.handlers = {}
 		self.not_console_logged_packets = set(("InternalPing", "ConnectedPong"))
 		self.file_logged_packets = set()
 		asyncio.async(self._check_connections_loop())
 
-		self.register_for_raknet_packet(MsgID.ConnectionRequest, self.on_connection_request)
-		self.register_for_raknet_packet(MsgID.ConnectionRequestAccepted, self.on_connection_request_accepted)
-		self.register_for_raknet_packet(MsgID.NewIncomingConnection, self.on_new_connection)
-		self.register_for_raknet_packet(MsgID.InternalPing, self.on_internal_ping)
-		self.register_for_raknet_packet(MsgID.DisconnectionNotification, self.on_disconnect_or_connection_lost)
-		self.register_for_raknet_packet(MsgID.ConnectionLost, self.on_disconnect_or_connection_lost)
-		self.register_for_raknet_packet(MsgID.ConnectionAttemptFailed, self.raise_exception_on_failed_connection_attempt)
+		self.register_handler(MsgID.ConnectionRequest, self.on_connection_request)
+		self.register_handler(MsgID.ConnectionRequestAccepted, self.on_connection_request_accepted)
+		self.register_handler(MsgID.NewIncomingConnection, self.on_new_connection)
+		self.register_handler(MsgID.InternalPing, self.on_internal_ping)
+		self.register_handler(MsgID.DisconnectionNotification, self.on_disconnect_or_connection_lost)
+		self.register_handler(MsgID.ConnectionLost, self.on_disconnect_or_connection_lost)
+		self.register_handler(MsgID.ConnectionAttemptFailed, self.raise_exception_on_failed_connection_attempt)
 		print("Started up")
 
 	# Protocol methods
@@ -50,6 +50,14 @@ class Peer:
 	def connection_made(self, transport):
 		self._transport = transport
 
+	@staticmethod
+	def pause_writing():
+		print("Sending too much, getting throttled")
+
+	@staticmethod
+	def resume_writing():
+		print("Sending is within limits again")
+
 	def datagram_received(self, data, address):
 		if len(data) <= 2: # If the length is leq 2 then this is a raw datagram
 			packet_id = data[0]
@@ -61,6 +69,14 @@ class Peer:
 			if address in self._connected:
 				for packet in self._connected[address].handle_datagram(data):
 					self.on_packet(packet, address)
+
+	@asyncio.coroutine
+	def _check_connections_loop(self):
+		while True:
+			for address, layer in self._connected.copy().items():
+				if layer._resends and layer.last_ack_time < time.time() - 10:
+					self.close_connection(address)
+			yield from asyncio.sleep(10)
 
 	# Sort of API methods
 
@@ -96,7 +112,10 @@ class Peer:
 			return
 		if address is None:
 			raise ValueError
-		self._log_packet(data, "snd")
+		if address not in self._connected:
+			print("Sending to someone we are not connected to!")
+			return
+		self.log_packet(data, address, received=False)
 		if raw:
 			self._transport.sendto(data, address)
 			return
@@ -104,24 +123,36 @@ class Peer:
 
 	# Overridable hooks
 
-	def packetname(self, data):
+	@staticmethod
+	def packetname(data):
 		"""String name of the packet for logging. If the name is not known, ValueError should be returned, in which case unknown_packetname will be called"""
 		return MsgID(data[0]).name
 
-	def unknown_packetname(self, data):
+	@staticmethod
+	def unknown_packetname(data):
 		"""Called when a packet name is unknown (see above). This should not throw an exception."""
 		return "%.2x" % data[0]
 
-	def handlers(self, data):
-		return self._raknet_packet_handlers.get(data[0], [])
+	@staticmethod
+	def packet_id(data):
+		return data[0]
 
-	def handler_data(self, data):
+	@staticmethod
+	def handler_data(data):
 		"""For cutting off headers that the handler already knows and are therefore redundant."""
 		return data[1:]
 
 	# Handler stuff
 
-	def _log_packet(self, data, prefix):
+	def register_handler(self, packet_id, handler=None, origin=None):
+		handlers = self.handlers.setdefault(packet_id, [])
+		if handler is None:
+			handler = asyncio.Future()
+			handlers.append((handler, origin))
+			return handler
+		handlers.append((handler, origin))
+
+	def log_packet(self, data, address, received):
 		try:
 			packetname = self.packetname(data)
 			file_log = packetname in self.file_logged_packets
@@ -136,18 +167,20 @@ class Peer:
 				file.write(data)
 
 		if console_log:
-			print(prefix, packetname)
+			if received:
+				print("got", packetname)
+			else:
+				print("snd", packetname)
 
 	def on_packet(self, data, address):
-		self._log_packet(data, "got")
+		self.log_packet(data, address, received=True)
 
-		handlers = self.handlers(data)
-		data = self.handler_data(data)
-
+		handlers = self.handlers.get(self.packet_id(data), ())
 		origin_handlers = [i for i in handlers if i[1] is None or i[1] == address]
 		if not origin_handlers:
-			pass#print("No handlers for the previously received message")
+			print("No handlers for the previously received message")
 
+		data = self.handler_data(data)
 		for handler_tuple in origin_handlers:
 			handler, origin_filter = handler_tuple
 			stream = BitStream(data)
@@ -158,33 +191,6 @@ class Peer:
 			else:
 				handler(stream, address)
 
-	def register_for_raknet_packet(self, *args, **kwargs):
-		return self._register(self._raknet_packet_handlers, *args, **kwargs)
-
-	@staticmethod
-	def _remove_handlers(address, handler_dict):
-		for packet_type in handler_dict:
-			handlers_to_remove = [handler for handler in handler_dict[packet_type] if handler[1] == address]
-			for handler in handlers_to_remove:
-				handler_dict[packet_type].remove(handler)
-
-	@staticmethod
-	def _register(handler_dict, packet_id, callback=None, origin=None):
-		handlers = handler_dict.setdefault(packet_id, [])
-
-		if callback is None:
-			callback = asyncio.Future()
-			handlers.append((callback, origin))
-			return callback
-		handlers.append((callback, origin))
-
-	@asyncio.coroutine
-	def _check_connections_loop(self):
-		while True:
-			for address, layer in self._connected.copy().items():
-				if layer._resends and layer.last_ack_time < time.time() - 1000:#10:
-					self.close_connection(address)
-			yield from asyncio.sleep(10)
 	# Packet callbacks
 
 	def on_open_connection_request(self, address):
@@ -246,7 +252,10 @@ class Peer:
 		self._connected[address].stop = True
 		del self._connected[address]
 		# Remove any registered handlers associated with the disconnected address
-		self._remove_handlers(address, self._raknet_packet_handlers)
+		for packet_type in self.handlers:
+			handlers_to_remove = [handler for handler in self.handlers[packet_type] if handler[1] == address]
+			for handler in handlers_to_remove:
+				self.handlers[packet_type].remove(handler)
 
 	@staticmethod
 	def raise_exception_on_failed_connection_attempt(data, address):

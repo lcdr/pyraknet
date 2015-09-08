@@ -11,7 +11,7 @@ import pyraknet.peer
 class Server(pyraknet.peer.Peer):
 	@asyncio.coroutine
 	def __init__(self, *args, **kwargs):
-		yield from pyraknet.peer.Peer.__init__(self, *args, **kwargs)
+		yield from super().__init__(*args, **kwargs)
 		print("Enter packet directory path to send packets in directory")
 		command_line = threading.Thread(target=self.input_loop, daemon=True) # I'd like to do this with asyncio but I can't figure out how
 		command_line.start()

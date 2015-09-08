@@ -10,9 +10,9 @@ class ReplicaManager:
 		self._objects = {}
 		self._current_network_id = 0
 		asyncio.async(self._serialize_loop())
-		self.register_for_raknet_packet(MsgID.ReplicaManagerConstruction, self.on_construction)
-		self.register_for_raknet_packet(MsgID.ReplicaManagerDestruction, self.on_destruction)
-		self.register_for_raknet_packet(MsgID.ReplicaManagerSerialize, self.on_serialize)
+		self.register_handler(MsgID.ReplicaManagerConstruction, self.on_construction)
+		self.register_handler(MsgID.ReplicaManagerDestruction, self.on_destruction)
+		self.register_handler(MsgID.ReplicaManagerSerialize, self.on_serialize)
 
 	def add_participant(self, address):
 		self._participants.add(address)
@@ -66,7 +66,7 @@ class ReplicaManager:
 				if obj._serialize:
 					self.serialize(obj)
 					obj._serialize = False
-			yield from asyncio.sleep(0.3)
+			yield from asyncio.sleep(0.03)
 
 	def on_construction(self, construction, address):
 		if address in self._participants:
