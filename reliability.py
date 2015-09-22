@@ -33,8 +33,8 @@ class ReliabilityLayer:
 		self._sends = []
 		self._resends = OrderedDict()
 
-		asyncio.async(self._send_loop(is_resends=False))
-		asyncio.async(self._send_loop(is_resends=True))
+		asyncio.ensure_future(self._send_loop(is_resends=False))
+		asyncio.ensure_future(self._send_loop(is_resends=True))
 
 	def handle_datagram(self, datagram):
 		stream = BitStream(datagram)
@@ -136,8 +136,7 @@ class ReliabilityLayer:
 		else:
 			self._sends.append((data, reliability, ordering_index, None, None, None))
 
-	@asyncio.coroutine
-	def _send_loop(self, is_resends):
+	async def _send_loop(self, is_resends):
 		if is_resends:
 			queue = self._resends
 			interval = 1
@@ -203,7 +202,7 @@ class ReliabilityLayer:
 				out.write(self._acks.serialize())
 				self._acks.clear()
 				self._transport.sendto(out, self._address)
-			yield from asyncio.sleep(interval)
+			await asyncio.sleep(interval)
 
 	@staticmethod
 	def packet_header_length(reliability, is_split_packet):

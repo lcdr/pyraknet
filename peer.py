@@ -7,17 +7,11 @@ from .reliability import PacketReliability, ReliabilityLayer
 from .msgIDs import MsgID
 
 class Peer:
-	@asyncio.coroutine
 	def __init__(self, address, max_incoming_connections, incoming_password):
-		if address is None:
-			self._address = ("", 0)
-		else:
-			host, port = address
-			if host == "localhost":
-				host = "127.0.0.1"
-			self._address = host, port
-			loop = asyncio.get_event_loop()
-			self._transport, protocol = yield from loop.create_datagram_endpoint(lambda: self, local_addr=self._address)
+		host, port = address
+		if host == "localhost":
+			host = "127.0.0.1"
+		self._address = host, port
 
 		self.incoming_password = incoming_password
 		self.max_incoming_connections = max_incoming_connections
@@ -26,7 +20,9 @@ class Peer:
 		self.handlers = {}
 		self.not_console_logged_packets = set(("InternalPing", "ConnectedPong"))
 		self.file_logged_packets = set()
-		asyncio.async(self._check_connections_loop())
+
+		asyncio.ensure_future(self.init_network())
+		asyncio.ensure_future(self._check_connections_loop())
 
 		self.register_handler(MsgID.ConnectionRequest, self.on_connection_request)
 		self.register_handler(MsgID.ConnectionRequestAccepted, self.on_connection_request_accepted)
@@ -36,6 +32,11 @@ class Peer:
 		self.register_handler(MsgID.ConnectionLost, self.on_disconnect_or_connection_lost)
 		self.register_handler(MsgID.ConnectionAttemptFailed, self.raise_exception_on_failed_connection_attempt)
 		print("Started up")
+
+	async def init_network(self, remote_address=None):
+		loop = asyncio.get_event_loop()
+		self._transport, protocol = await loop.create_datagram_endpoint(lambda: self, local_addr=self._address, remote_addr=remote_address)
+		self._address = self._transport.get_extra_info("sockname")
 
 	# Protocol methods
 
@@ -70,28 +71,23 @@ class Peer:
 				for packet in self._connected[address].handle_datagram(data):
 					self.on_packet(packet, address)
 
-	@asyncio.coroutine
-	def _check_connections_loop(self):
+	async def _check_connections_loop(self):
 		while True:
 			for address, layer in self._connected.copy().items():
 				if layer._resends and layer.last_ack_time < time.time() - 10:
 					self.close_connection(address)
-			yield from asyncio.sleep(10)
+			await asyncio.sleep(10)
 
 	# Sort of API methods
 
-	@asyncio.coroutine
-	def connect(self, address, server_password):
+	async def connect(self, address, server_password):
 		host, port = address
 		if host == "localhost":
 			host = "127.0.0.1"
 		address = host, port
 
 		self._outgoing_passwords[address] = server_password
-
-		loop = asyncio.get_event_loop()
-		self._transport, protocol = yield from loop.create_datagram_endpoint(lambda: self, remote_addr=address)
-		self._address = self._transport.get_extra_info("sockname")
+		await self.init_network(address)
 		self.send(bytes((MsgID.OpenConnectionRequest, 0)), address, raw=True)
 
 	def close_connection(self, address):
@@ -188,6 +184,8 @@ class Peer:
 				handler.set_result((stream, address))
 				# Futures are one-time-use only
 				handlers.remove(handler_tuple)
+			elif asyncio.iscoroutinefunction(handler):
+				asyncio.ensure_future(handler(stream, address))
 			else:
 				handler(stream, address)
 

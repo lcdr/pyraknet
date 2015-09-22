@@ -9,9 +9,8 @@ import traceback
 import pyraknet.peer
 
 class Server(pyraknet.peer.Peer):
-	@asyncio.coroutine
 	def __init__(self, *args, **kwargs):
-		yield from super().__init__(*args, **kwargs)
+		super().__init__(*args, **kwargs)
 		print("Enter packet directory path to send packets in directory")
 		command_line = threading.Thread(target=self.input_loop, daemon=True) # I'd like to do this with asyncio but I can't figure out how
 		command_line.start()
@@ -27,15 +26,10 @@ class Server(pyraknet.peer.Peer):
 			except OSError:
 				traceback.print_exc()
 
-@asyncio.coroutine
-def main():
-	server = Server.__new__(Server)
+if __name__ == "__main__":
 	print("Enter server port")
 	port = int(input())
-	yield from server.__init__(("localhost", port), max_incoming_connections=10, incoming_password=b"3.25 ND1")
-
-if __name__ == "__main__":
-	asyncio.async(main())
+	Server(("localhost", port), max_incoming_connections=10, incoming_password=b"3.25 ND1")
 
 	loop = asyncio.get_event_loop()
 	loop.run_forever()

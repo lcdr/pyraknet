@@ -9,7 +9,7 @@ class ReplicaManager:
 		self._network_ids = {}
 		self._objects = {}
 		self._current_network_id = 0
-		asyncio.async(self._serialize_loop())
+		asyncio.ensure_future(self._serialize_loop())
 		self.register_handler(MsgID.ReplicaManagerConstruction, self.on_construction)
 		self.register_handler(MsgID.ReplicaManagerDestruction, self.on_destruction)
 		self.register_handler(MsgID.ReplicaManagerSerialize, self.on_serialize)
@@ -60,13 +60,13 @@ class ReplicaManager:
 
 		del self._network_ids[obj]
 
-	def _serialize_loop(self):
+	async def _serialize_loop(self):
 		while True:
 			for obj in self._network_ids:
 				if obj._serialize:
 					self.serialize(obj)
 					obj._serialize = False
-			yield from asyncio.sleep(0.03)
+			await asyncio.sleep(0.03)
 
 	def on_construction(self, construction, address):
 		if address in self._participants:
