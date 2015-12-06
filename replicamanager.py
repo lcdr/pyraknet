@@ -1,7 +1,7 @@
 import asyncio
 
 from .bitstream import BitStream, c_bit, c_ubyte, c_ushort
-from .msgIDs import MsgID
+from .messages import Message
 
 class ReplicaManager:
 	def __init__(self):
@@ -10,9 +10,9 @@ class ReplicaManager:
 		self._objects = {}
 		self._current_network_id = 0
 		asyncio.ensure_future(self._serialize_loop())
-		self.register_handler(MsgID.ReplicaManagerConstruction, self.on_construction)
-		self.register_handler(MsgID.ReplicaManagerDestruction, self.on_destruction)
-		self.register_handler(MsgID.ReplicaManagerSerialize, self.on_serialize)
+		self.register_handler(Message.ReplicaManagerConstruction, self.on_construction)
+		self.register_handler(Message.ReplicaManagerDestruction, self.on_destruction)
+		self.register_handler(Message.ReplicaManagerSerialize, self.on_serialize)
 
 	def add_participant(self, address):
 		self._participants.add(address)
@@ -32,7 +32,7 @@ class ReplicaManager:
 			self._current_network_id += 1
 
 		out = BitStream()
-		out.write(c_ubyte(MsgID.ReplicaManagerConstruction))
+		out.write(c_ubyte(Message.ReplicaManagerConstruction))
 		out.write(c_bit(True))
 		out.write(c_ushort(self._network_ids[obj]))
 		out.write(obj.send_construction())
@@ -42,7 +42,7 @@ class ReplicaManager:
 
 	def serialize(self, obj):
 		out = BitStream()
-		out.write(c_ubyte(MsgID.ReplicaManagerSerialize))
+		out.write(c_ubyte(Message.ReplicaManagerSerialize))
 		out.write(c_ushort(self._network_ids[obj]))
 		out.write(obj.serialize())
 
@@ -52,7 +52,7 @@ class ReplicaManager:
 	def destruct(self, obj):
 		print("destructing", obj)
 		out = BitStream()
-		out.write(c_ubyte(MsgID.ReplicaManagerDestruction))
+		out.write(c_ubyte(Message.ReplicaManagerDestruction))
 		out.write(c_ushort(self._network_ids[obj]))
 
 		for participant in self._participants:

@@ -4,7 +4,7 @@ import time
 
 from .bitstream import BitStream, c_ubyte, c_uint, c_ushort
 from .reliability import PacketReliability, ReliabilityLayer
-from .msgIDs import MsgID
+from .messages import Message
 
 class Peer:
 	def __init__(self, address, max_incoming_connections, incoming_password):
@@ -24,13 +24,13 @@ class Peer:
 		asyncio.ensure_future(self.init_network())
 		asyncio.ensure_future(self._check_connections_loop())
 
-		self.register_handler(MsgID.ConnectionRequest, self.on_connection_request)
-		self.register_handler(MsgID.ConnectionRequestAccepted, self.on_connection_request_accepted)
-		self.register_handler(MsgID.NewIncomingConnection, self.on_new_connection)
-		self.register_handler(MsgID.InternalPing, self.on_internal_ping)
-		self.register_handler(MsgID.DisconnectionNotification, self.on_disconnect_or_connection_lost)
-		self.register_handler(MsgID.ConnectionLost, self.on_disconnect_or_connection_lost)
-		self.register_handler(MsgID.ConnectionAttemptFailed, self.raise_exception_on_failed_connection_attempt)
+		self.register_handler(Message.ConnectionRequest, self.on_connection_request)
+		self.register_handler(Message.ConnectionRequestAccepted, self.on_connection_request_accepted)
+		self.register_handler(Message.NewIncomingConnection, self.on_new_connection)
+		self.register_handler(Message.InternalPing, self.on_internal_ping)
+		self.register_handler(Message.DisconnectionNotification, self.on_disconnect_or_connection_lost)
+		self.register_handler(Message.ConnectionLost, self.on_disconnect_or_connection_lost)
+		self.register_handler(Message.ConnectionAttemptFailed, self.raise_exception_on_failed_connection_attempt)
 		print("Started up")
 
 	async def init_network(self, remote_address=None):
@@ -62,9 +62,9 @@ class Peer:
 	def datagram_received(self, data, address):
 		if len(data) <= 2: # If the length is leq 2 then this is a raw datagram
 			packet_id = data[0]
-			if packet_id == MsgID.OpenConnectionRequest:
+			if packet_id == Message.OpenConnectionRequest:
 				self.on_open_connection_request(address)
-			elif packet_id == MsgID.OpenConnectionReply:
+			elif packet_id == Message.OpenConnectionReply:
 				self.on_open_connection_reply(address)
 		else:
 			if address in self._connected:
@@ -88,12 +88,12 @@ class Peer:
 
 		self._outgoing_passwords[address] = server_password
 		await self.init_network(address)
-		self.send(bytes((MsgID.OpenConnectionRequest, 0)), address, raw=True)
+		self.send(bytes((Message.OpenConnectionRequest, 0)), address, raw=True)
 
 	def close_connection(self, address):
 		if address in self._connected:
-			self.send(bytes((MsgID.DisconnectionNotification,)), address)
-			self.on_packet(bytes((MsgID.DisconnectionNotification,)), address)
+			self.send(bytes((Message.DisconnectionNotification,)), address)
+			self.on_packet(bytes((Message.DisconnectionNotification,)), address)
 		else:
 			print("Tried closing connection to someone we are not connected to! (Todo: Implement the router)")
 
@@ -122,7 +122,7 @@ class Peer:
 	@staticmethod
 	def packetname(data):
 		"""String name of the packet for logging. If the name is not known, ValueError should be returned, in which case unknown_packetname will be called"""
-		return MsgID(data[0]).name
+		return Message(data[0]).name
 
 	@staticmethod
 	def unknown_packetname(data):
@@ -195,7 +195,7 @@ class Peer:
 		if len(self._connected) < self.max_incoming_connections:
 			if address not in self._connected:
 				self._connected[address] = ReliabilityLayer(self._transport, address)
-			self.send(bytes((MsgID.OpenConnectionReply, 0)), address, raw=True)
+			self.send(bytes((Message.OpenConnectionReply, 0)), address, raw=True)
 		else:
 			raise NotImplementedError
 
@@ -204,7 +204,7 @@ class Peer:
 			if address not in self._connected:
 				self._connected[address] = ReliabilityLayer(self._transport, address)
 			response = BitStream()
-			response.write(c_ubyte(MsgID.ConnectionRequest))
+			response.write(c_ubyte(Message.ConnectionRequest))
 			response.write(self._outgoing_passwords[address])
 			self.send(response, address, reliability=PacketReliability.Reliable)
 		else:
@@ -214,7 +214,7 @@ class Peer:
 		packet_password = data
 		if self.incoming_password == packet_password:
 			response = BitStream()
-			response.write(c_ubyte(MsgID.ConnectionRequestAccepted))
+			response.write(c_ubyte(Message.ConnectionRequestAccepted))
 			response.write(socket.inet_aton(address[0]))
 			response.write(c_ushort(address[1]))
 			response.write(bytes(2)) # Connection index, seems like this was right out ignored in RakNet
@@ -226,7 +226,7 @@ class Peer:
 
 	def on_connection_request_accepted(self, data, address):
 		response = BitStream()
-		response.write(c_ubyte(MsgID.NewIncomingConnection))
+		response.write(c_ubyte(Message.NewIncomingConnection))
 		response.write(socket.inet_aton(address[0]))
 		response.write(c_ushort(address[1]))
 		response.write(socket.inet_aton(self._address[0]))
@@ -240,7 +240,7 @@ class Peer:
 		ping_send_time = data[:4]
 
 		pong = BitStream()
-		pong.write(c_ubyte(MsgID.ConnectedPong))
+		pong.write(c_ubyte(Message.ConnectedPong))
 		pong.write(ping_send_time)
 		pong.write(c_uint(int(time.perf_counter() * 1000)))
 		self.send(pong, address, PacketReliability.Unreliable)

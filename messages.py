@@ -1,6 +1,6 @@
 from enum import IntEnum
 
-class MsgID(IntEnum):
+class Message(IntEnum):
 	InternalPing = 0x00
 	Ping = 0x01
 	PingOpenConnections = 0x02
