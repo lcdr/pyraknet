@@ -135,12 +135,10 @@ class BitStream(bytearray):
 
 		self.write_bits(byte_arg[current_byte:], bits)
 
-	def write_aligned_bytes(self, byte_arg):
+	def align_write(self):
 		if self._write_offset % 8 != 0:
 			self._alloc_bits(8 - self._write_offset % 8)
 			self._write_offset += 8 - self._write_offset % 8
-
-		self.write(byte_arg)
 
 	def _alloc_bits(self, number_of_bits):
 		bytes_to_allocate = math.ceil((self._write_offset + number_of_bits) / 8) - len(self)
@@ -241,11 +239,9 @@ class BitStream(bytearray):
 			bits = 8
 		return self.read_bits(bits) + bytearray(number_of_bytes - current_byte - 1)
 
-	def read_aligned_bytes(self, number_of_bytes):
+	def align_read(self):
 		if self._read_offset % 8 != 0:
 			self._read_offset += 8 - self._read_offset % 8
-
-		return self.read_bits(number_of_bytes * 8)
 
 	def all_read(self):
 		# This is not accurate to the bit, just to the byte

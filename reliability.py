@@ -74,7 +74,8 @@ class ReliabilityLayer:
 				raise NotImplementedError
 
 			length = data.read(c_ushort, compressed=True)
-			packet_data = data.read_aligned_bytes(math.ceil(length / 8))
+			data.align_read()
+			packet_data = data.read(bytes, length=math.ceil(length / 8))
 
 			if reliability in (PacketReliability.Reliable, PacketReliability.ReliableOrdered):
 				self._acks.append(message_number)
@@ -186,7 +187,8 @@ class ReliabilityLayer:
 					out.write(c_uint(split_packet_index), compressed=True)
 					out.write(c_uint(split_packet_count), compressed=True)
 				out.write(c_ushort(len(data) * 8), compressed=True)
-				out.write_aligned_bytes(data)
+				out.align_write()
+				out.write(data)
 
 				assert len(out) < 1492 # maximum packet size handled by raknet
 				self._transport.sendto(out, self._address)
