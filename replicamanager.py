@@ -7,12 +7,8 @@ class ReplicaManager:
 	def __init__(self):
 		self._participants = set()
 		self._network_ids = {}
-		self._objects = {}
 		self._current_network_id = 0
 		asyncio.ensure_future(self._serialize_loop())
-		self.register_handler(Message.ReplicaManagerConstruction, self.on_construction)
-		self.register_handler(Message.ReplicaManagerDestruction, self.on_destruction)
-		self.register_handler(Message.ReplicaManagerSerialize, self.on_serialize)
 
 	def add_participant(self, address):
 		self._participants.add(address)
@@ -51,6 +47,7 @@ class ReplicaManager:
 
 	def destruct(self, obj):
 		print("destructing", obj)
+		obj.on_destruction()
 		out = BitStream()
 		out.write(c_ubyte(Message.ReplicaManagerDestruction))
 		out.write(c_ushort(self._network_ids[obj]))
@@ -67,19 +64,3 @@ class ReplicaManager:
 					self.serialize(obj)
 					obj._serialize = False
 			await asyncio.sleep(0.03)
-
-	def on_construction(self, construction, address):
-		if address in self._participants:
-			assert construction.read(c_bit)
-			network_id = construction.read(c_ushort)
-			self._objects[network_id] = self.on_replica_manager_construction(construction)
-
-	def on_serialize(self, serialize, address):
-		if address in self._participants:
-			network_id = serialize.read(c_ushort)
-			self._objects[network_id].deserialize(serialize)
-
-	def on_destruction(self, destruction, address):
-		if address in self._participants:
-			network_id = destruction.read(c_ushort)
-			del self._objects[network_id]

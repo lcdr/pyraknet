@@ -6,9 +6,9 @@ import os
 import threading
 import traceback
 
-import pyraknet.peer
+import pyraknet.server
 
-class Server(pyraknet.peer.Peer):
+class Server(pyraknet.server.Server):
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, **kwargs)
 		print("Enter packet directory path to send packets in directory")
@@ -29,7 +29,7 @@ class Server(pyraknet.peer.Peer):
 if __name__ == "__main__":
 	print("Enter server port")
 	port = int(input())
-	Server(("localhost", port), max_incoming_connections=10, incoming_password=b"3.25 ND1")
+	Server(("localhost", port), max_connections=10, incoming_password=b"3.25 ND1")
 
 	loop = asyncio.get_event_loop()
 	loop.run_forever()

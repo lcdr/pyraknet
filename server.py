@@ -6,17 +6,16 @@ from .bitstream import BitStream, c_ubyte, c_uint, c_ushort
 from .reliability import PacketReliability, ReliabilityLayer
 from .messages import Message
 
-class Peer:
-	def __init__(self, address, max_incoming_connections, incoming_password):
+class Server:
+	def __init__(self, address, max_connections, incoming_password):
 		host, port = address
 		if host == "localhost":
 			host = "127.0.0.1"
 		self._address = host, port
 
+		self.max_connections = max_connections
 		self.incoming_password = incoming_password
-		self.max_incoming_connections = max_incoming_connections
 		self._connected = {}
-		self._outgoing_passwords = {}
 		self.handlers = {}
 		self.not_console_logged_packets = set(("InternalPing", "ConnectedPong"))
 		self.file_logged_packets = set()
@@ -25,17 +24,15 @@ class Peer:
 		asyncio.ensure_future(self._check_connections_loop())
 
 		self.register_handler(Message.ConnectionRequest, self.on_connection_request)
-		self.register_handler(Message.ConnectionRequestAccepted, self.on_connection_request_accepted)
 		self.register_handler(Message.NewIncomingConnection, self.on_new_connection)
 		self.register_handler(Message.InternalPing, self.on_internal_ping)
 		self.register_handler(Message.DisconnectionNotification, self.on_disconnect_or_connection_lost)
 		self.register_handler(Message.ConnectionLost, self.on_disconnect_or_connection_lost)
-		self.register_handler(Message.ConnectionAttemptFailed, self.raise_exception_on_failed_connection_attempt)
 		print("Started up")
 
-	async def init_network(self, remote_address=None):
+	async def init_network(self):
 		loop = asyncio.get_event_loop()
-		self._transport, protocol = await loop.create_datagram_endpoint(lambda: self, local_addr=self._address, remote_addr=remote_address)
+		self._transport, protocol = await loop.create_datagram_endpoint(lambda: self, local_addr=self._address)
 		self._address = self._transport.get_extra_info("sockname")
 
 	# Protocol methods
@@ -61,11 +58,8 @@ class Peer:
 
 	def datagram_received(self, data, address):
 		if len(data) <= 2: # If the length is leq 2 then this is a raw datagram
-			packet_id = data[0]
-			if packet_id == Message.OpenConnectionRequest:
+			if data[0] == Message.OpenConnectionRequest:
 				self.on_open_connection_request(address)
-			elif packet_id == Message.OpenConnectionReply:
-				self.on_open_connection_reply(address)
 		else:
 			if address in self._connected:
 				for packet in self._connected[address].handle_datagram(data):
@@ -80,16 +74,6 @@ class Peer:
 
 	# Sort of API methods
 
-	async def connect(self, address, server_password):
-		host, port = address
-		if host == "localhost":
-			host = "127.0.0.1"
-		address = host, port
-
-		self._outgoing_passwords[address] = server_password
-		await self.init_network(address)
-		self.send(bytes((Message.OpenConnectionRequest, 0)), address, raw=True)
-
 	def close_connection(self, address):
 		if address in self._connected:
 			self.send(bytes((Message.DisconnectionNotification,)), address)
@@ -97,14 +81,14 @@ class Peer:
 		else:
 			print("Tried closing connection to someone we are not connected to! (Todo: Implement the router)")
 
-	def send(self, data, address=None, broadcast=False, reliability=PacketReliability.ReliableOrdered, raw=False):
+	def send(self, data, address=None, broadcast=False, reliability=PacketReliability.ReliableOrdered):
 		assert reliability != PacketReliability.ReliableSequenced # If you need this one, tell me
 		if broadcast:
 			recipients = self._connected.copy()
 			if address is not None:
 				del recipients[address]
 			for recipient in recipients:
-				self.send(data, recipient, False, reliability, raw)
+				self.send(data, recipient, False, reliability)
 			return
 		if address is None:
 			raise ValueError
@@ -112,9 +96,6 @@ class Peer:
 			print("Sending to someone we are not connected to!")
 			return
 		self.log_packet(data, address, received=False)
-		if raw:
-			self._transport.sendto(data, address)
-			return
 		self._connected[address].send(data, reliability)
 
 	# Overridable hooks
@@ -140,12 +121,8 @@ class Peer:
 
 	# Handler stuff
 
-	def register_handler(self, packet_id, handler=None, origin=None):
+	def register_handler(self, packet_id, handler, origin=None):
 		handlers = self.handlers.setdefault(packet_id, [])
-		if handler is None:
-			handler = asyncio.Future()
-			handlers.append((handler, origin))
-			return handler
 		handlers.append((handler, origin))
 
 	def log_packet(self, data, address, received):
@@ -180,11 +157,7 @@ class Peer:
 		for handler_tuple in origin_handlers:
 			handler, origin_filter = handler_tuple
 			stream = BitStream(data)
-			if isinstance(handler, asyncio.Future):
-				handler.set_result((stream, address))
-				# Futures are one-time-use only
-				handlers.remove(handler_tuple)
-			elif asyncio.iscoroutinefunction(handler):
+			if asyncio.iscoroutinefunction(handler):
 				asyncio.ensure_future(handler(stream, address))
 			else:
 				handler(stream, address)
@@ -192,21 +165,10 @@ class Peer:
 	# Packet callbacks
 
 	def on_open_connection_request(self, address):
-		if len(self._connected) < self.max_incoming_connections:
+		if len(self._connected) < self.max_connections:
 			if address not in self._connected:
 				self._connected[address] = ReliabilityLayer(self._transport, address)
-			self.send(bytes((Message.OpenConnectionReply, 0)), address, raw=True)
-		else:
-			raise NotImplementedError
-
-	def on_open_connection_reply(self, address):
-		if len(self._connected) < self.max_incoming_connections:
-			if address not in self._connected:
-				self._connected[address] = ReliabilityLayer(self._transport, address)
-			response = BitStream()
-			response.write(c_ubyte(Message.ConnectionRequest))
-			response.write(self._outgoing_passwords[address])
-			self.send(response, address, reliability=PacketReliability.Reliable)
+			self._transport.sendto(bytes((Message.OpenConnectionReply, 0)), address)
 		else:
 			raise NotImplementedError
 
@@ -223,15 +185,6 @@ class Peer:
 			self.send(response, address, reliability=PacketReliability.Reliable)
 		else:
 			raise NotImplementedError
-
-	def on_connection_request_accepted(self, data, address):
-		response = BitStream()
-		response.write(c_ubyte(Message.NewIncomingConnection))
-		response.write(socket.inet_aton(address[0]))
-		response.write(c_ushort(address[1]))
-		response.write(socket.inet_aton(self._address[0]))
-		response.write(c_ushort(self._address[1]))
-		self.send(response, address, reliability=PacketReliability.Reliable)
 
 	def on_new_connection(self, data, address):
 		print("New Connection from", address)
@@ -254,7 +207,3 @@ class Peer:
 			handlers_to_remove = [handler for handler in self.handlers[packet_type] if handler[1] == address]
 			for handler in handlers_to_remove:
 				self.handlers[packet_type].remove(handler)
-
-	@staticmethod
-	def raise_exception_on_failed_connection_attempt(data, address):
-		raise RuntimeError("Connection attempt to %s failed! :(" % str(address))
