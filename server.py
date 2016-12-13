@@ -1,10 +1,13 @@
 import asyncio
+import logging
 import socket
 import time
 
 from .bitstream import BitStream, c_ubyte, c_uint, c_ushort
 from .reliability import PacketReliability, ReliabilityLayer
 from .messages import Message
+
+log = logging.getLogger(__name__)
 
 class Server:
 	def __init__(self, address, max_connections, incoming_password):
@@ -28,7 +31,7 @@ class Server:
 		self.register_handler(Message.InternalPing, self.on_internal_ping)
 		self.register_handler(Message.DisconnectionNotification, self.on_disconnect_or_connection_lost)
 		self.register_handler(Message.ConnectionLost, self.on_disconnect_or_connection_lost)
-		print("Started up")
+		log.info("Started up")
 
 	async def init_network(self):
 		loop = asyncio.get_event_loop()
@@ -39,22 +42,22 @@ class Server:
 
 	@staticmethod
 	def connection_lost(exc):
-		print(exc)
+		log.exception(exc)
 
 	@staticmethod
 	def error_received(exc):
-		print(exc, vars(exc))
+		log.exception(exc, vars(exc))
 
 	def connection_made(self, transport):
 		self._transport = transport
 
 	@staticmethod
 	def pause_writing():
-		print("Sending too much, getting throttled")
+		log.warn("Sending too much, getting throttled")
 
 	@staticmethod
 	def resume_writing():
-		print("Sending is within limits again")
+		log.info("Sending is within limits again")
 
 	def datagram_received(self, data, address):
 		if len(data) <= 2: # If the length is leq 2 then this is a raw datagram
@@ -79,7 +82,7 @@ class Server:
 			self.send(bytes((Message.DisconnectionNotification,)), address)
 			self.on_packet(bytes((Message.DisconnectionNotification,)), address)
 		else:
-			print("Tried closing connection to someone we are not connected to! (Todo: Implement the router)")
+			log.error("Tried closing connection to someone we are not connected to! (Todo: Implement the router)")
 
 	def send(self, data, address=None, broadcast=False, reliability=PacketReliability.ReliableOrdered):
 		assert reliability != PacketReliability.ReliableSequenced # If you need this one, tell me
@@ -93,7 +96,7 @@ class Server:
 		if address is None:
 			raise ValueError
 		if address not in self._connected:
-			print("Sending to someone we are not connected to!")
+			log.error("Sending to someone we are not connected to!")
 			return
 		self.log_packet(data, address, received=False)
 		self._connected[address].send(data, reliability)
@@ -141,9 +144,9 @@ class Server:
 
 		if console_log:
 			if received:
-				print("got", packetname)
+				log.debug("got %s", packetname)
 			else:
-				print("snd", packetname)
+				log.debug("snd %s", packetname)
 
 	def on_packet(self, data, address):
 		self.log_packet(data, address, received=True)
@@ -151,7 +154,7 @@ class Server:
 		handlers = self.handlers.get(self.packet_id(data), ())
 		origin_handlers = [i for i in handlers if i[1] is None or i[1] == address]
 		if not origin_handlers:
-			print("No handlers for the previously received message")
+			log.warn("No handlers for the previously received message")
 
 		data = self.handler_data(data)
 		for handler_tuple in origin_handlers:
@@ -187,7 +190,7 @@ class Server:
 			raise NotImplementedError
 
 	def on_new_connection(self, data, address):
-		print("New Connection from", address)
+		log.info("New Connection from %s", address)
 
 	def on_internal_ping(self, data, address):
 		ping_send_time = data[:4]
@@ -199,7 +202,7 @@ class Server:
 		self.send(pong, address, PacketReliability.Unreliable)
 
 	def on_disconnect_or_connection_lost(self, data, address):
-		print("Disconnect/Connection lost to %s" % str(address))
+		log.info("Disconnect/Connection lost to %s", address)
 		self._connected[address].stop = True
 		del self._connected[address]
 		# Remove any registered handlers associated with the disconnected address

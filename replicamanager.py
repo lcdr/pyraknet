@@ -1,7 +1,10 @@
 import asyncio
+import logging
 
 from .bitstream import BitStream, c_bit, c_ubyte, c_ushort
 from .messages import Message
+
+log = logging.getLogger(__name__)
 
 class ReplicaManager:
 	def __init__(self):
@@ -46,7 +49,7 @@ class ReplicaManager:
 			self.send(out, participant)
 
 	def destruct(self, obj):
-		print("destructing", obj)
+		log.debug("destructing %s", obj)
 		obj.on_destruction()
 		out = BitStream()
 		out.write(c_ubyte(Message.ReplicaManagerDestruction))

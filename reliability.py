@@ -1,11 +1,14 @@
 # Todo: combine packets in datagrams if possible
 import asyncio
+import logging
 import math
 import time
 from collections import OrderedDict
 
 from . import rangelist
 from .bitstream import BitStream, c_bit, c_uint, c_ushort
+
+log = logging.getLogger(__name__)
 
 class PacketReliability:
 	Unreliable = 0
@@ -84,7 +87,7 @@ class ReliabilityLayer:
 				del self._last_received[0]
 				self._last_received.append(message_number)
 			else:
-				print("got duplicate")
+				log.warn("got duplicate")
 				continue
 
 			if reliability == PacketReliability.UnreliableSequenced:
@@ -92,7 +95,7 @@ class ReliabilityLayer:
 					self._sequenced_read_index = ordering_index + 1
 				else:
 					# Since we have already filtered duplicate packets, this should never happen
-					print("Received unfiltered sequenced duplicate, increase size of _last_received!")
+					log.error("Received unfiltered sequenced duplicate, increase size of _last_received!")
 					continue
 			elif reliability == PacketReliability.ReliableOrdered:
 				if ordering_index == self._ordered_read_index:
@@ -104,7 +107,7 @@ class ReliabilityLayer:
 						ord += 1
 				elif ordering_index < self._ordered_read_index:
 					# Since we have already filtered duplicate packets, this should never happen
-					print("Received unfiltered ordered duplicate, increase size of _last_received!")
+					log.error("Received unfiltered ordered duplicate, increase size of _last_received!")
 					continue
 				else:
 					# Packet arrived too early, we're still waiting for a previous packet
