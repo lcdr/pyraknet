@@ -43,7 +43,7 @@ class ReliabilityLayer:
 		stream = BitStream(datagram)
 		if self.handle_datagram_header(stream):
 			return # Acks only packet
- 		# There can be multiple packets in one datagram
+		# There can be multiple packets in one datagram
 		yield from self.parse_packets(stream)
 
 	def handle_datagram_header(self, data):
@@ -64,11 +64,11 @@ class ReliabilityLayer:
 	def parse_packets(self, data):
 		while not data.all_read():
 			message_number = data.read(c_uint)
-			reliability = data.read_bits(3)[0]
+			reliability = data.read_bits(3)
 			assert reliability != PacketReliability.ReliableSequenced # This is never used
 
 			if reliability == PacketReliability.UnreliableSequenced or reliability == PacketReliability.ReliableOrdered:
-				ordering_channel = data.read_bits(5)[0]
+				ordering_channel = data.read_bits(5)
 				assert ordering_channel == 0 # No one actually uses a custom ordering channel
 				ordering_index = data.read(c_uint)
 
@@ -168,7 +168,7 @@ class ReliabilityLayer:
 					out.write(self._acks.serialize())
 					self._acks.clear()
 
-				if len(out) + ReliabilityLayer.packet_header_length(reliability, split_packet_id != None) + len(data) > 1492:
+				if len(out) + ReliabilityLayer.packet_header_length(reliability, split_packet_id is not None) + len(data) > 1492:
 					continue
 
 				has_remote_system_time = False # time is only used for us to get back to calculate ping, and we don't do that
@@ -177,13 +177,13 @@ class ReliabilityLayer:
 
 				out.write(c_uint(message_number))
 
-				out.write_bits(reliability.to_bytes(length=1, byteorder="little"), 3)
+				out.write_bits(reliability, 3)
 
 				if reliability in (PacketReliability.UnreliableSequenced, PacketReliability.ReliableOrdered):
-					out.write_bits(b"\0", 5) # ordering_channel, no one ever uses anything else than 0
+					out.write_bits(0, 5) # ordering_channel, no one ever uses anything else than 0
 					out.write(c_uint(ordering_index))
 
-				is_split_packet = split_packet_id != None
+				is_split_packet = split_packet_id is not None
 				out.write(c_bit(is_split_packet))
 				if is_split_packet:
 					out.write(c_ushort(split_packet_id))

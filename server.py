@@ -53,7 +53,7 @@ class Server:
 
 	@staticmethod
 	def pause_writing():
-		log.warn("Sending too much, getting throttled")
+		log.warning("Sending too much, getting throttled")
 
 	@staticmethod
 	def resume_writing():
@@ -154,7 +154,7 @@ class Server:
 		handlers = self.handlers.get(self.packet_id(data), ())
 		origin_handlers = [i for i in handlers if i[1] is None or i[1] == address]
 		if not origin_handlers:
-			log.warn("No handlers for the previously received message")
+			log.warning("No handlers for the previously received message")
 
 		data = self.handler_data(data)
 		for handler_tuple in origin_handlers:

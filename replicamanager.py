@@ -11,7 +11,6 @@ class ReplicaManager:
 		self._participants = set()
 		self._network_ids = {}
 		self._current_network_id = 0
-		asyncio.ensure_future(self._serialize_loop())
 
 	def add_participant(self, address):
 		self._participants.add(address)
@@ -59,11 +58,3 @@ class ReplicaManager:
 			self.send(out, participant)
 
 		del self._network_ids[obj]
-
-	async def _serialize_loop(self):
-		while True:
-			for obj in self._network_ids:
-				if obj._serialize:
-					self.serialize(obj)
-					obj._serialize = False
-			await asyncio.sleep(0.03)

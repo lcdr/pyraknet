@@ -6,6 +6,9 @@ class Struct(struct.Struct):
 	def __call__(self, value):
 		return self.pack(value)
 
+	def __str__(self):
+		return "<Struct %s>" % self.format
+
 c_bool = Struct("?")
 c_float = Struct("f")
 c_double = Struct("d")
@@ -34,15 +37,29 @@ class c_bit:
 	def __init__(self, boolean):
 		self.value = boolean
 
+# Note: a ton of the logic here assumes that the write offset is never moved back, that is, that you never overwrite things
+# Doing so may break everything
 class BitStream(bytearray):
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, **kwargs)
-		self._write_offset = 0
+		self._write_offset = len(self) * 8
 		self._read_offset = 0
 
 	def write(self, arg, compressed=False, char_size:"for strings"=2, allocated_length:"for fixed-length strings"=None, length_type:"for variable-length strings"=None):
 		if isinstance(arg, BitStream):
-			self.write_bits(bytes(arg), arg._write_offset, align_right=False)
+			self._write_bytes(arg)
+			if arg._write_offset % 8 != 0:
+				# this should work assuming the part after the arg's write offset is completely 0
+				self._write_offset -= 8 - arg._write_offset % 8
+				# in some cases it's possible we've written an unnecessary byte
+				if self._write_offset//8 == len(self)-2:
+					del self[-1]
+			return
+		if isinstance(arg, (bytes, bytearray)):
+			if compressed:
+				self._write_compressed(arg)
+			else:
+				self._write_bytes(arg)
 			return
 		if isinstance(arg, c_bit):
 			self._write_bit(arg.value)
@@ -50,13 +67,8 @@ class BitStream(bytearray):
 		if isinstance(arg, str):
 			self._write_str(arg, char_size, allocated_length, length_type)
 			return
-		if not isinstance(arg, (bytes, bytearray)):
-			raise TypeError(arg)
 
-		if compressed:
-			self._write_compressed(arg)
-		else:
-			self.write_bits(arg)
+		raise TypeError(arg)
 
 	def _write_str(self, str_, char_size, allocated_length, length_type):
 		# possibly include default encoded lengths for non-variable-length strings (seem to be 33 for string and 66 for wstring)
@@ -78,7 +90,7 @@ class BitStream(bytearray):
 			if len(encoded_string) > allocated_length:
 				raise ValueError("String too long!")
 			encoded_string += bytes(allocated_length-len(encoded_string))
-		self.write_bits(encoded_string)
+		self._write_bytes(encoded_string)
 
 	def _write_bit(self, bit):
 		self._alloc_bits(1)
@@ -87,28 +99,32 @@ class BitStream(bytearray):
 
 		self._write_offset += 1
 
-	def write_bits(self, byte_arg, number_of_bits=None, align_right=True):
-		if number_of_bits is None:
-			number_of_bits = len(byte_arg) * 8
+	def write_bits(self, value, number_of_bits):
+		assert 0 < number_of_bits < 8
 		self._alloc_bits(number_of_bits)
-		offset = 0
-		while number_of_bits > 0:
-			data_byte = byte_arg[offset]
-			if number_of_bits < 8 and align_right: # In the case of a partial byte, the bits are aligned from the right (bit 0) rather than the left (as in the normal internal representation)
-				data_byte = data_byte << (8 - number_of_bits) & 0xff # Shift left to get the bits on the left, as in our internal representation
-			if self._write_offset % 8 == 0:
-				self[self._write_offset//8] = data_byte
-			else:
-				self[self._write_offset//8] |= data_byte >> self._write_offset % 8 # First half
-				if 8 - self._write_offset % 8 < number_of_bits: # If we didn't write it all out in the first half (8 - self._write_offset % 8 is the number we wrote in the first half)
-					self[self._write_offset//8 + 1] = (data_byte << 8 - self._write_offset % 8) & 0xff # Second half (overlaps byte boundary)
-			if number_of_bits >= 8:
-				self._write_offset += 8
-				number_of_bits -= 8
-				offset += 1
-			else:
-				self._write_offset += number_of_bits
-				return
+
+		if number_of_bits < 8: # In the case of a partial byte, the bits are aligned from the right (bit 0) rather than the left (as in the normal internal representation)
+			value = value << (8 - number_of_bits) & 0xff # Shift left to get the bits on the left, as in our internal representation
+		if self._write_offset % 8 == 0:
+			self[self._write_offset//8] = value
+		else:
+			self[self._write_offset//8] |= value >> self._write_offset % 8 # First half
+			if 8 - self._write_offset % 8 < number_of_bits: # If we didn't write it all out in the first half (8 - self._write_offset % 8 is the number we wrote in the first half)
+				self[self._write_offset//8 + 1] = (value << 8 - self._write_offset % 8) & 0xff # Second half (overlaps byte boundary)
+
+		self._write_offset += number_of_bits
+
+	def _write_bytes(self, byte_arg):
+		if self._write_offset % 8 == 0:
+			self[self._write_offset//8:self._write_offset//8+len(byte_arg)] = byte_arg
+		else:
+			# shift new input to current shift
+			new = (int.from_bytes(byte_arg, "big") << (8 - self._write_offset % 8)).to_bytes(len(byte_arg)+1, "big")
+			# update current byte
+			self[self._write_offset//8] |= new[0]
+			# add rest
+			self[self._write_offset//8+1:self._write_offset//8+1+len(byte_arg)] = new[1:]
+		self._write_offset += len(byte_arg)*8
 
 	def _write_compressed(self, byte_arg):
 		current_byte = len(byte_arg) - 1
@@ -120,20 +136,18 @@ class BitStream(bytearray):
 			self._write_bit(is_zero)
 			if not is_zero:
 				# Write the remainder of the data
-				self.write_bits(byte_arg, (current_byte + 1) * 8)
+				self._write_bytes(byte_arg[:current_byte + 1])
 				return
 			current_byte -= 1
 
 		# If the upper half of the last byte is 0 then write 1 and the remaining 4 bits. Otherwise write 0 and the 8 bits.
 
-		is_zero = byte_arg[current_byte] & 0xF0 == 0x00
+		is_zero = byte_arg[0] & 0xF0 == 0x00
 		self._write_bit(is_zero)
 		if is_zero:
-			bits = 4
+			self.write_bits(byte_arg[0], 4)
 		else:
-			bits = 8
-
-		self.write_bits(byte_arg[current_byte:], bits)
+			self._write_bytes(byte_arg[:1])
 
 	def align_write(self):
 		if self._write_offset % 8 != 0:
@@ -156,16 +170,26 @@ class BitStream(bytearray):
 					raise NotImplementedError
 				read = self._read_compressed(arg_type.size)
 			else:
-				read = self.read_bits(arg_type.size * 8)
+				read = self._read_bytes(arg_type.size)
 			return arg_type.unpack(read)[0]
 		if issubclass(arg_type, c_bit):
 			return self._read_bit()
 		if issubclass(arg_type, str):
 			return self._read_str(char_size, allocated_length, length_type)
 		if issubclass(arg_type, bytes):
-			return self.read_bits(length * 8)
+			return self._read_bytes(length)
 		if issubclass(arg_type, BitStream):
-			return BitStream(self.read_bits(length, align_right=False))
+			r = self._read_offset
+			output = BitStream(self._read_bytes(length//8))
+			if length % 8 != 0:
+				endbyte = (self[self._read_offset//8] << self._read_offset % 8) & 0xff
+				if self._read_offset % 8 != 0 and length % 8 > 8 - self._read_offset % 8:
+					endbyte |= self[self._read_offset//8 + 1] >> 8 - self._read_offset % 8
+				endbyte &= ~((1 << 8-length%8)-1)
+				output._write_bytes(bytes([endbyte]))
+				output._write_offset -= 8 - length % 8
+				self._read_offset += length % 8
+			return output
 		raise TypeError(arg_type)
 
 	def _read_str(self, char_size, allocated_length, length_type):
@@ -184,7 +208,7 @@ class BitStream(bytearray):
 			# Fixed-length string
 			byte_str = bytearray()
 			while len(byte_str) < allocated_length:
-				char = self.read_bits(char_size * 8)
+				char = self._read_bytes(char_size)
 				if sum(char) == 0:
 					self.skip_read(allocated_length - len(byte_str) - char_size)
 					break
@@ -197,28 +221,26 @@ class BitStream(bytearray):
 		self._read_offset += 1
 		return bit
 
-	def read_bits(self, number_of_bits, align_right=True):
-		if self._read_offset % 8 == 0 and number_of_bits % 8 == 0: # optimization for no bitshifts
-			output = self[self._read_offset//8:self._read_offset//8+number_of_bits//8]
-			self._read_offset += number_of_bits
-			return output
+	def read_bits(self, number_of_bits):
+		assert 0 < number_of_bits < 8
 
-		output = bytearray(math.ceil(number_of_bits / 8))
-		offset = 0
-		while number_of_bits > 0:
-			output[offset] |= (self[self._read_offset//8] << self._read_offset % 8) & 0xff # First half
-			if self._read_offset % 8 != 0 and number_of_bits > 8 - self._read_offset % 8: # If we have a second half, we didn't read enough bytes in the first half
-				output[offset] |= self[self._read_offset//8 + 1] >> 8 - self._read_offset % 8 # Second half (overlaps byte boundary)
-			self._read_offset += 8
-			if number_of_bits >= 8:
-				number_of_bits -= 8
-			else:
-				number_of_unread_bits = 8 - number_of_bits
-				if align_right:
-					output[offset] >>= number_of_unread_bits
-				self._read_offset -= number_of_unread_bits
-				break
-			offset += 1
+		output = (self[self._read_offset//8] << self._read_offset % 8) & 0xff # First half
+		if self._read_offset % 8 != 0 and number_of_bits > 8 - self._read_offset % 8: # If we have a second half, we didn't read enough bytes in the first half
+			output |= self[self._read_offset//8 + 1] >> 8 - self._read_offset % 8 # Second half (overlaps byte boundary)
+		output >>= 8 - number_of_bits
+		self._read_offset += number_of_bits
+		return output
+
+	def _read_bytes(self, length):
+		if self._read_offset % 8 == 0:
+			output = self[self._read_offset//8:self._read_offset//8+length]
+		else:
+			output = self[self._read_offset//8:self._read_offset//8+length+1]
+			# clear the part before the struct
+			output[0] &= (1 << 8-self._read_offset%8) - 1
+			# shift back
+			output = (int.from_bytes(output, "big") >> (8-self._read_offset%8)).to_bytes(length, "big")
+		self._read_offset += length*8
 		return output
 
 	def _read_compressed(self, number_of_bytes):
@@ -229,15 +251,15 @@ class BitStream(bytearray):
 				current_byte -= 1
 			else:
 				# Read the rest of the bytes
-				return bytearray(number_of_bytes - current_byte - 1) + self.read_bits((current_byte + 1) * 8)
+				return bytearray(number_of_bytes - current_byte - 1) + self._read_bytes(current_byte + 1)
 
 		# All but the first bytes are 0. If the upper half of the last byte is a 0 (positive) or 16 (negative) then what we read will be a 1 and the remaining 4 bits.
 		# Otherwise we read a 0 and the 8 bits
 		if self._read_bit():
-			bits = 4
+			start = bytes([self.read_bits(4)])
 		else:
-			bits = 8
-		return self.read_bits(bits) + bytearray(number_of_bytes - current_byte - 1)
+			start = self._read_bytes(1)
+		return start + bytearray(number_of_bytes - current_byte - 1)
 
 	def align_read(self):
 		if self._read_offset % 8 != 0:
