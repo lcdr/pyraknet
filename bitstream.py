@@ -45,7 +45,7 @@ class BitStream(bytearray):
 		self._write_offset = len(self) * 8
 		self._read_offset = 0
 
-	def write(self, arg, compressed=False, char_size:"for strings"=2, allocated_length:"for fixed-length strings"=None, length_type:"for variable-length strings"=None):
+	def write(self, arg, compressed=False, allocated_length:"for fixed-length strings"=None, length_type:"for variable-length strings"=None):
 		if isinstance(arg, BitStream):
 			self._write_bytes(arg)
 			if arg._write_offset % 8 != 0:
@@ -54,6 +54,9 @@ class BitStream(bytearray):
 				# in some cases it's possible we've written an unnecessary byte
 				if self._write_offset//8 == len(self)-2:
 					del self[-1]
+			return
+		if allocated_length is not None or length_type is not None:
+			self._write_str(arg, allocated_length, length_type)
 			return
 		if isinstance(arg, (bytes, bytearray)):
 			if compressed:
@@ -64,33 +67,31 @@ class BitStream(bytearray):
 		if isinstance(arg, c_bit):
 			self._write_bit(arg.value)
 			return
-		if isinstance(arg, str):
-			self._write_str(arg, char_size, allocated_length, length_type)
-			return
 
 		raise TypeError(arg)
 
-	def _write_str(self, str_, char_size, allocated_length, length_type):
+	def _write_str(self, str_, allocated_length, length_type):
 		# possibly include default encoded lengths for non-variable-length strings (seem to be 33 for string and 66 for wstring)
-		if char_size == 2:
-			encoding = "utf-16-le"
-		elif char_size == 1:
-			encoding = "latin1"
+		if isinstance(str_, str):
+			encoded_str = str_.encode("utf-16-le")
 		else:
-			raise ValueError(char_size)
-
-		encoded_string = str_.encode(encoding)
+			encoded_str = str_
 
 		if length_type is not None:
 			# Variable-length string
 			self.write(length_type(len(str_))) # note: there's also a version that uses the length of the encoded string, should that be used?
 		else:
 			# Fixed-length string
-			encoded_string += bytes(char_size) # null terminator
-			if len(encoded_string) > allocated_length:
+			# null terminator
+			if isinstance(str_, str):
+				char_size = 2
+			else:
+				char_size = 1
+
+			if len(encoded_str)+char_size > allocated_length:
 				raise ValueError("String too long!")
-			encoded_string += bytes(allocated_length-len(encoded_string))
-		self._write_bytes(encoded_string)
+			encoded_str += bytes(allocated_length-len(encoded_str))
+		self._write_bytes(encoded_str)
 
 	def _write_bit(self, bit):
 		self._alloc_bits(1)
@@ -163,7 +164,7 @@ class BitStream(bytearray):
 	def skip_read(self, byte_length):
 		self._read_offset += byte_length * 8
 
-	def read(self, arg_type, compressed=False, length:"for BitStream (in bits) and for bytes (in bytes)"=None, char_size:"for strings"=2, allocated_length:"for fixed-length strings"=None, length_type:"for variable-length strings"=None):
+	def read(self, arg_type, compressed=False, length:"for BitStream (in bits) and for bytes (in bytes)"=None, allocated_length:"for fixed-length strings"=None, length_type:"for variable-length strings"=None):
 		if isinstance(arg_type, struct.Struct):
 			if compressed:
 				if arg_type in (c_float, c_double):
@@ -174,8 +175,8 @@ class BitStream(bytearray):
 			return arg_type.unpack(read)[0]
 		if issubclass(arg_type, c_bit):
 			return self._read_bit()
-		if issubclass(arg_type, str):
-			return self._read_str(char_size, allocated_length, length_type)
+		if allocated_length is not None or length_type is not None:
+			return self._read_str(arg_type, allocated_length, length_type)
 		if issubclass(arg_type, bytes):
 			return self._read_bytes(length)
 		if issubclass(arg_type, BitStream):
@@ -192,13 +193,11 @@ class BitStream(bytearray):
 			return output
 		raise TypeError(arg_type)
 
-	def _read_str(self, char_size, allocated_length, length_type):
-		if char_size == 2:
-			encoding = "utf-16-le"
-		elif char_size == 1:
-			encoding = "latin1"
+	def _read_str(self, arg_type, allocated_length, length_type):
+		if issubclass(arg_type, str):
+			char_size = 2
 		else:
-			raise ValueError(char_size)
+			char_size = 1
 
 		if length_type is not None:
 			# Variable-length string
@@ -214,7 +213,9 @@ class BitStream(bytearray):
 					break
 				byte_str += char
 
-		return byte_str.decode(encoding)
+		if issubclass(arg_type, str):
+			return byte_str.decode("utf-16-le")
+		return byte_str
 
 	def _read_bit(self):
 		bit = self[self._read_offset//8] & 0x80 >> self._read_offset % 8 != 0

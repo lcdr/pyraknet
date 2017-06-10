@@ -21,7 +21,7 @@ class ReliabilityLayer:
 	def __init__(self, transport, address):
 		self.stop = False
 		self.last_ack_time = 0
-		self.split_packet_id = 0
+		self._split_packet_id = 0
 		self._remote_system_time = 0
 		self._transport = transport
 		self._address = address
@@ -31,13 +31,11 @@ class ReliabilityLayer:
 		self._sequenced_read_index = 0
 		self._ordered_write_index = 0
 		self._ordered_read_index = 0
-		self._last_received = [-1] * 50
 		self._out_of_order_packets = {} # for ReliableOrdered
 		self._sends = []
 		self._resends = OrderedDict()
 
-		asyncio.ensure_future(self._send_loop(is_resends=False))
-		asyncio.ensure_future(self._send_loop(is_resends=True))
+		self._send_loop()
 
 	def handle_datagram(self, datagram):
 		stream = BitStream(datagram)
@@ -54,6 +52,7 @@ class ReliabilityLayer:
 			for message_number in acks.ranges():
 				if message_number in self._resends:
 					del self._resends[message_number]
+
 			self.last_ack_time = time.time()
 		if data.all_read():
 			return True
@@ -83,19 +82,11 @@ class ReliabilityLayer:
 			if reliability in (PacketReliability.Reliable, PacketReliability.ReliableOrdered):
 				self._acks.append(message_number)
 
-			if message_number not in self._last_received:
-				del self._last_received[0]
-				self._last_received.append(message_number)
-			else:
-				log.warn("got duplicate")
-				continue
-
 			if reliability == PacketReliability.UnreliableSequenced:
 				if ordering_index >= self._sequenced_read_index:
 					self._sequenced_read_index = ordering_index + 1
 				else:
-					# Since we have already filtered duplicate packets, this should never happen
-					log.error("Received unfiltered sequenced duplicate, increase size of _last_received!")
+					log.warn("got duplicate")
 					continue
 			elif reliability == PacketReliability.ReliableOrdered:
 				if ordering_index == self._ordered_read_index:
@@ -103,16 +94,17 @@ class ReliabilityLayer:
 					ord = ordering_index+1
 					while ord in self._out_of_order_packets:
 						self._ordered_read_index += 1
+						log.info("Releasing ord-index %i", ord)
 						yield self._out_of_order_packets.pop(ord)
 						ord += 1
 				elif ordering_index < self._ordered_read_index:
-					# Since we have already filtered duplicate packets, this should never happen
-					log.error("Received unfiltered ordered duplicate, increase size of _last_received!")
+					log.warn("got duplicate")
 					continue
 				else:
 					# Packet arrived too early, we're still waiting for a previous packet
 					# Add this one to a queue so we can process it later
 					self._out_of_order_packets[ordering_index] = packet_data
+					log.info("Packet too early m# %i ord-index %i>%i", message_number, ordering_index, self._ordered_read_index)
 			yield packet_data
 
 	def send(self, data, reliability):
@@ -133,81 +125,80 @@ class ReliabilityLayer:
 				chunks.append(data[data_offset:data_offset+data_length])
 				data_offset += data_length
 
-			split_packet_id = self.split_packet_id
-			self.split_packet_id += 1
+			split_packet_id = self._split_packet_id
+			self._split_packet_id += 1
 			for split_packet_index, chunk in enumerate(chunks):
 				self._sends.append((chunk, reliability, ordering_index, split_packet_id, split_packet_index, len(chunks)))
 		else:
 			self._sends.append((data, reliability, ordering_index, None, None, None))
 
-	async def _send_loop(self, is_resends):
-		if is_resends:
-			queue = self._resends
-			interval = 1
-		else:
-			queue = self._sends
-			interval = 0.03
+	def _send_loop(self):
+		for packet in self._sends:
+			data, reliability, ordering_index, split_packet_id, split_packet_index, split_packet_count = packet
+			message_number = self._send_message_number_index
+			self._send_message_number_index += 1
 
-		while True:
-			if self.stop:
-				break
-			queue_copy = queue.copy()
-			for i in queue_copy:
-				if is_resends:
-					message_number = i
-					data, reliability, ordering_index, split_packet_id, split_packet_index, split_packet_count = queue_copy[i]
-				else:
-					data, reliability, ordering_index, split_packet_id, split_packet_index, split_packet_count = i
-					message_number = self._send_message_number_index
-					self._send_message_number_index += 1
+			self._send_packet(data, message_number, reliability, ordering_index, split_packet_id, split_packet_index, split_packet_count)
 
-				out = BitStream()
-				out.write(c_bit(len(self._acks) != 0))
-				if self._acks:
-					out.write(c_uint(self._remote_system_time))
-					out.write(self._acks.serialize())
-					self._acks.clear()
+			if reliability == PacketReliability.Reliable or reliability == PacketReliability.ReliableOrdered:
+				self._resends[message_number] = time.time()+1, packet
+		self._sends.clear()
 
-				if len(out) + ReliabilityLayer.packet_header_length(reliability, split_packet_id is not None) + len(data) > 1492:
-					continue
+		for message_number, resend_data in self._resends.items():
+			resend_time, packet = resend_data
+			if resend_time > time.time():
+				continue
+			log.info("actually resending %i", message_number)
+			data, reliability, ordering_index, split_packet_id, split_packet_index, split_packet_count = packet
+			self._send_packet(data, message_number, reliability, ordering_index, split_packet_id, split_packet_index, split_packet_count)
+			if reliability == PacketReliability.Reliable or reliability == PacketReliability.ReliableOrdered:
+				self._resends[message_number] = time.time()+1, packet
 
-				has_remote_system_time = False # time is only used for us to get back to calculate ping, and we don't do that
-				out.write(c_bit(has_remote_system_time))
-				#out.write(c_uint(remote_system_time))
+		if self._acks:
+			out = BitStream()
+			out.write(c_bit(True))
+			out.write(c_uint(self._remote_system_time))
+			out.write(self._acks.serialize())
+			self._acks.clear()
+			self._transport.sendto(out, self._address)
 
-				out.write(c_uint(message_number))
+		if not self.stop:
+			asyncio.get_event_loop().call_later(0.03, self._send_loop)
 
-				out.write_bits(reliability, 3)
+	def _send_packet(self, data, message_number, reliability, ordering_index, split_packet_id, split_packet_index, split_packet_count):
+		out = BitStream()
+		out.write(c_bit(len(self._acks) != 0))
+		if self._acks:
+			out.write(c_uint(self._remote_system_time))
+			out.write(self._acks.serialize())
+			self._acks.clear()
 
-				if reliability in (PacketReliability.UnreliableSequenced, PacketReliability.ReliableOrdered):
-					out.write_bits(0, 5) # ordering_channel, no one ever uses anything else than 0
-					out.write(c_uint(ordering_index))
+		assert len(out) + ReliabilityLayer.packet_header_length(reliability, split_packet_id is not None) + len(data) < 1492
 
-				is_split_packet = split_packet_id is not None
-				out.write(c_bit(is_split_packet))
-				if is_split_packet:
-					out.write(c_ushort(split_packet_id))
-					out.write(c_uint(split_packet_index), compressed=True)
-					out.write(c_uint(split_packet_count), compressed=True)
-				out.write(c_ushort(len(data) * 8), compressed=True)
-				out.align_write()
-				out.write(data)
+		has_remote_system_time = False # time is only used for us to get back to calculate ping, and we don't do that
+		out.write(c_bit(has_remote_system_time))
+		#out.write(c_uint(remote_system_time))
 
-				assert len(out) < 1492 # maximum packet size handled by raknet
-				self._transport.sendto(out, self._address)
+		out.write(c_uint(message_number))
 
-				if not is_resends:
-					if reliability == PacketReliability.Reliable or reliability == PacketReliability.ReliableOrdered:
-						self._resends[message_number] = i
-					self._sends.remove(i)
-			if self._acks:
-				out = BitStream()
-				out.write(c_bit(True))
-				out.write(c_uint(self._remote_system_time))
-				out.write(self._acks.serialize())
-				self._acks.clear()
-				self._transport.sendto(out, self._address)
-			await asyncio.sleep(interval)
+		out.write_bits(reliability, 3)
+
+		if reliability in (PacketReliability.UnreliableSequenced, PacketReliability.ReliableOrdered):
+			out.write_bits(0, 5) # ordering_channel, no one ever uses anything else than 0
+			out.write(c_uint(ordering_index))
+
+		is_split_packet = split_packet_id is not None
+		out.write(c_bit(is_split_packet))
+		if is_split_packet:
+			out.write(c_ushort(split_packet_id))
+			out.write(c_uint(split_packet_index), compressed=True)
+			out.write(c_uint(split_packet_count), compressed=True)
+		out.write(c_ushort(len(data) * 8), compressed=True)
+		out.align_write()
+		out.write(data)
+
+		assert len(out) < 1492 # maximum packet size handled by raknet
+		self._transport.sendto(out, self._address)
 
 	@staticmethod
 	def packet_header_length(reliability, is_split_packet):
