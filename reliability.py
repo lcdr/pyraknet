@@ -1,3 +1,7 @@
+"""
+Reliability layer. UDP doesn't guarantee delivery or ordering, so this is where RakNet provides optional support for these features.
+For retransmission algorithm see http://www.saminiir.com/lets-code-tcp-ip-stack-5-tcp-retransmission
+"""
 # Todo: combine packets in datagrams if possible
 import asyncio
 import logging
@@ -26,12 +30,15 @@ class ReliabilityLayer:
 		self._transport = transport
 		self._address = address
 		self._acks = rangelist.RangeList()
+		self._rto = 1  # retransmission timeout = 1 second
+		self._srtt = None  # smoothed round trip time
+		self._rtt_var = None  # round trip time variation
 		self._send_message_number_index = 0
 		self._sequenced_write_index = 0
 		self._sequenced_read_index = 0
 		self._ordered_write_index = 0
 		self._ordered_read_index = 0
-		self._out_of_order_packets = {} # for ReliableOrdered
+		self._out_of_order_packets = {}  # for ReliableOrdered
 		self._sends = []
 		self._resends = OrderedDict()
 
@@ -40,14 +47,27 @@ class ReliabilityLayer:
 	def handle_datagram(self, datagram):
 		stream = BitStream(datagram)
 		if self.handle_datagram_header(stream):
-			return # Acks only packet
+			return  # Acks only packet
 		# There can be multiple packets in one datagram
 		yield from self.parse_packets(stream)
 
 	def handle_datagram_header(self, data):
 		has_acks = data.read(c_bit)
 		if has_acks:
-			assert data.read(c_uint) == 0 # unused
+			old_time = data.read(c_uint)
+			rtt = time.perf_counter() - old_time/1000
+			if self._srtt is None:
+				self._srtt = rtt
+				self._rtt_var = rtt/2
+				self._rto = self._srtt + 4*self._rtt_var  # originally specified be at least clock resolution but since the client loop is set at 10 milliseconds there's no way it can be smaller anyways
+			else:
+				alpha = 0.125
+				beta = 0.25
+				self._rtt_var = (1 - beta) * self._rtt_var + beta * abs(self._srtt - rtt)
+				self._srtt = (1 - alpha) * self._srtt + alpha * rtt
+				self._rto = self._srtt + 4*self._rtt_var  # resolution same as above
+			self._rto = max(1, self._rto)
+
 			acks = rangelist.RangeList(data)
 			for message_number in acks.ranges():
 				if message_number in self._resends:
@@ -64,11 +84,11 @@ class ReliabilityLayer:
 		while not data.all_read():
 			message_number = data.read(c_uint)
 			reliability = data.read_bits(3)
-			assert reliability != PacketReliability.ReliableSequenced # This is never used
+			assert reliability != PacketReliability.ReliableSequenced  # This is never used
 
 			if reliability == PacketReliability.UnreliableSequenced or reliability == PacketReliability.ReliableOrdered:
 				ordering_channel = data.read_bits(5)
-				assert ordering_channel == 0 # No one actually uses a custom ordering channel
+				assert ordering_channel == 0  # No one actually uses a custom ordering channel
 				ordering_index = data.read(c_uint)
 
 			is_split_packet = data.read(c_bit)
@@ -117,7 +137,7 @@ class ReliabilityLayer:
 		else:
 			ordering_index = None
 
-		if ReliabilityLayer.packet_header_length(reliability, False) + len(data) >= 1492 - 28: # mtu - udp header
+		if ReliabilityLayer.packet_header_length(reliability, False) + len(data) >= 1492 - 28:  # mtu - udp header
 			data_offset = 0
 			chunks = []
 			while data_offset < len(data):
@@ -141,7 +161,7 @@ class ReliabilityLayer:
 			self._send_packet(data, message_number, reliability, ordering_index, split_packet_id, split_packet_index, split_packet_count)
 
 			if reliability == PacketReliability.Reliable or reliability == PacketReliability.ReliableOrdered:
-				self._resends[message_number] = time.time()+1, packet
+				self._resends[message_number] = time.time()+self._rto, packet
 		self._sends.clear()
 
 		for message_number, resend_data in self._resends.items():
@@ -152,7 +172,7 @@ class ReliabilityLayer:
 			data, reliability, ordering_index, split_packet_id, split_packet_index, split_packet_count = packet
 			self._send_packet(data, message_number, reliability, ordering_index, split_packet_id, split_packet_index, split_packet_count)
 			if reliability == PacketReliability.Reliable or reliability == PacketReliability.ReliableOrdered:
-				self._resends[message_number] = time.time()+1, packet
+				self._resends[message_number] = time.time()+self._rto, packet
 
 		if self._acks:
 			out = BitStream()
@@ -175,16 +195,16 @@ class ReliabilityLayer:
 
 		assert len(out) + ReliabilityLayer.packet_header_length(reliability, split_packet_id is not None) + len(data) < 1492
 
-		has_remote_system_time = False # time is only used for us to get back to calculate ping, and we don't do that
+		has_remote_system_time = True
 		out.write(c_bit(has_remote_system_time))
-		#out.write(c_uint(remote_system_time))
+		out.write(c_uint(int(time.perf_counter() * 1000)))
 
 		out.write(c_uint(message_number))
 
 		out.write_bits(reliability, 3)
 
 		if reliability in (PacketReliability.UnreliableSequenced, PacketReliability.ReliableOrdered):
-			out.write_bits(0, 5) # ordering_channel, no one ever uses anything else than 0
+			out.write_bits(0, 5)  # ordering_channel, no one ever uses anything else than 0
 			out.write(c_uint(ordering_index))
 
 		is_split_packet = split_packet_id is not None
@@ -197,20 +217,20 @@ class ReliabilityLayer:
 		out.align_write()
 		out.write(data)
 
-		assert len(out) < 1492 # maximum packet size handled by raknet
+		assert len(out) < 1492  # maximum packet size handled by raknet
 		self._transport.sendto(out, self._address)
 
 	@staticmethod
 	def packet_header_length(reliability, is_split_packet):
-		length = 32 # message number
-		length += 3 # reliability
+		length = 32  # message number
+		length += 3  # reliability
 		if reliability in (PacketReliability.UnreliableSequenced, PacketReliability.ReliableOrdered):
-			length += 5 # ordering channel
+			length += 5  # ordering channel
 			length += 32
-		length += 1 # is split packet
+		length += 1  # is split packet
 		if is_split_packet:
-			length += 16 # split packet id
-			length += 32 # split packet index (actually a compressed write so assume the maximum)
-			length += 32 # split packet count (actually a compressed write so assume the maximum)
-		length += 16 # data length (actually a compressed write so assume the maximum)
+			length += 16  # split packet id
+			length += 32  # split packet index (actually a compressed write so assume the maximum)
+			length += 32  # split packet count (actually a compressed write so assume the maximum)
+		length += 16  # data length (actually a compressed write so assume the maximum)
 		return math.ceil(length / 8)

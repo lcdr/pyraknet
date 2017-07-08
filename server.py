@@ -24,7 +24,7 @@ class Server:
 		self.file_logged_packets = set()
 
 		asyncio.ensure_future(self.init_network())
-		asyncio.ensure_future(self._check_connections_loop())
+		asyncio.get_event_loop().call_later(10, self._check_connections)
 
 		self.register_handler(Message.ConnectionRequest, self.on_connection_request)
 		self.register_handler(Message.NewIncomingConnection, self.on_new_connection)
@@ -46,7 +46,7 @@ class Server:
 
 	@staticmethod
 	def error_received(exc):
-		log.exception(exc, vars(exc))
+		log.exception(exc)
 
 	def connection_made(self, transport):
 		self._transport = transport
@@ -60,7 +60,7 @@ class Server:
 		log.info("Sending is within limits again")
 
 	def datagram_received(self, data, address):
-		if len(data) <= 2: # If the length is leq 2 then this is a raw datagram
+		if len(data) <= 2:  # If the length is leq 2 then this is a raw datagram
 			if data[0] == Message.OpenConnectionRequest:
 				self.on_open_connection_request(address)
 		else:
@@ -68,12 +68,12 @@ class Server:
 				for packet in self._connected[address].handle_datagram(data):
 					self.on_packet(packet, address)
 
-	async def _check_connections_loop(self):
-		while True:
-			for address, layer in self._connected.copy().items():
-				if layer._resends and layer.last_ack_time < time.time() - 10:
-					self.close_connection(address)
-			await asyncio.sleep(10)
+	def _check_connections(self):
+		# close connections that haven't sent acks in the last 10 seconds
+		for address, layer in self._connected.copy().items():
+			if layer._resends and layer.last_ack_time < time.time() - 10:
+				self.close_connection(address)
+		asyncio.get_event_loop().call_later(10, self._check_connections)
 
 	# Sort of API methods
 
@@ -85,7 +85,7 @@ class Server:
 			log.error("Tried closing connection to someone we are not connected to! (Todo: Implement the router)")
 
 	def send(self, data, address=None, broadcast=False, reliability=PacketReliability.ReliableOrdered):
-		assert reliability != PacketReliability.ReliableSequenced # If you need this one, tell me
+		assert reliability != PacketReliability.ReliableSequenced  # If you need this one, tell me
 		if broadcast:
 			recipients = self._connected.copy()
 			if address is not None:
@@ -182,7 +182,7 @@ class Server:
 			response.write(c_ubyte(Message.ConnectionRequestAccepted))
 			response.write(socket.inet_aton(address[0]))
 			response.write(c_ushort(address[1]))
-			response.write(bytes(2)) # Connection index, seems like this was right out ignored in RakNet
+			response.write(bytes(2))  # Connection index, seems like this was right out ignored in RakNet
 			response.write(socket.inet_aton(self._address[0]))
 			response.write(c_ushort(self._address[1]))
 			self.send(response, address, reliability=PacketReliability.Reliable)
