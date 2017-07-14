@@ -9,20 +9,20 @@ class Struct(struct.Struct):
 	def __str__(self):
 		return "<Struct %s>" % self.format
 
-c_bool = Struct("?")
-c_float = Struct("f")
-c_double = Struct("d")
-c_int = Struct("i")
-c_uint = Struct("I")
+c_bool = Struct("<?")
+c_float = Struct("<f")
+c_double = Struct("<d")
+c_int = Struct("<i")
+c_uint = Struct("<I")
 
-c_byte = Struct("b")
-c_ubyte = Struct("B")
-c_short = Struct("h")
-c_ushort = Struct("H")
-c_long = Struct("l")
-c_ulong = Struct("L")
-c_longlong = Struct("q")
-c_ulonglong = Struct("Q")
+c_byte = Struct("<b")
+c_ubyte = Struct("<B")
+c_short = Struct("<h")
+c_ushort = Struct("<H")
+c_long = Struct("<l")
+c_ulong = Struct("<L")
+c_longlong = Struct("<q")
+c_ulonglong = Struct("<Q")
 
 c_int8 = c_byte
 c_uint8 = c_ubyte
