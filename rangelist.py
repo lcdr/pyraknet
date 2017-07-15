@@ -1,11 +1,12 @@
+from collections.abc import Iterable
+
 from .bitstream import BitStream, c_bit, c_uint, c_ushort
 
-class RangeList(list):
+class RangeList(Iterable):
 	"""
-	List that stores things and compresses them to ranges if possible.
-	To add an item, use append (does not necessarily add to the end).
+	List that stores integers and compresses them to ranges if possible.
+	To add an item, use insert.
 	To get the uncompressed ranges, use ranges.
-	Any other methods operate on the internal representation and not items, avoid using them if you don't need them.
 
 	Internal:
 		The internal list of ranges is auto-sorted.
@@ -14,7 +15,7 @@ class RangeList(list):
 
 	def __init__(self, input_stream=None):
 		"""Init the rangelist, optionally by deserializing from a bitstream."""
-		super().__init__()
+		self._ranges = []
 		if input_stream is not None:
 			count = input_stream.read(c_ushort, compressed=True)
 			for _ in range(count):
@@ -24,15 +25,21 @@ class RangeList(list):
 					max = min
 				else:
 					max = input_stream.read(c_uint)
-				super().append((min, max))
+				self._ranges.append([min, max])
 
-	def ranges(self):
+	def __bool__(self):
+		return bool(self._ranges)
+
+	def __iter__(self):
 		"""Yield the numbers in the ranges, basically uncompressing the ranges."""
-		for min, max in self:
+		for min, max in self._ranges:
 			yield from range(min, max + 1)
 
-	def append(self, item):
-		iter_ = iter(self)
+	def clear(self):
+		self._ranges.clear()
+
+	def insert(self, item):
+		iter_ = iter(self._ranges)
 		for range in iter_:
 			if range[0] == item + 1: # The item can extend the range
 				range[0] -= 1
@@ -45,7 +52,7 @@ class RangeList(list):
 						if nextrange[0] == item + 1: # The newly updated list has a max of one less than the next list, in which case we can merge these
 							# Merge the ranges
 							range[1] = nextrange[1]
-							self.remove(nextrange)
+							self._ranges.remove(nextrange)
 					except StopIteration:
 						pass
 					break
@@ -53,22 +60,22 @@ class RangeList(list):
 					break
 				continue # The item is higher than the current range, check next range
 			# If we got here, the range starts at a higher position than the item, so we should insert it now (the list is auto-sorted so there can't be any other position)
-			super().insert(self.index(range), [item, item])
+			self._ranges.insert(self._ranges.index(range), [item, item])
 			break
 		else:
 			# We ran through the whole list and couldn't find a good existing range
-			super().append([item, item])
+			self._ranges.append([item, item])
 
 	def serialize(self):
 		"""
 		Serialize the RangeList. This is meant to be compatible with RakNet's serialization.
-		(This currently serializes items as uints, since currently the only occurence where I need to serialize a rangelist is with an uint)
+		(This currently serializes items as uints, since currently the only occurrence where I need to serialize a rangelist is with an uint)
 		"""
 		out = BitStream()
-		out.write(c_ushort(len(self)), compressed=True)
-		for range in self:
-			out.write(c_bit(range[0] == range[1]))
-			out.write(c_uint(range[0]))
-			if range[0] != range[1]:
-				out.write(c_uint(range[1]))
+		out.write(c_ushort(len(self._ranges)), compressed=True)
+		for min, max in self._ranges:
+			out.write(c_bit(min == max))
+			out.write(c_uint(min))
+			if min != max:
+				out.write(c_uint(max))
 		return out

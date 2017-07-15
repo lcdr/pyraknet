@@ -13,5 +13,6 @@ setup(
 	url="https://bitbucket.org/lcdr/pyraknet/",
 	license="GPL v3",
 	packages=["pyraknet"],
-	package_dir={"pyraknet": root_path}
+	package_dir={"pyraknet": root_path},
+	python_requires=">=3.6"
 )

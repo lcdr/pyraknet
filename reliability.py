@@ -69,7 +69,7 @@ class ReliabilityLayer:
 			self._rto = max(1, self._rto)
 
 			acks = rangelist.RangeList(data)
-			for message_number in acks.ranges():
+			for message_number in acks:
 				if message_number in self._resends:
 					del self._resends[message_number]
 
@@ -100,7 +100,7 @@ class ReliabilityLayer:
 			packet_data = data.read(bytes, length=math.ceil(length / 8))
 
 			if reliability in (PacketReliability.Reliable, PacketReliability.ReliableOrdered):
-				self._acks.append(message_number)
+				self._acks.insert(message_number)
 
 			if reliability == PacketReliability.UnreliableSequenced:
 				if ordering_index >= self._sequenced_read_index:
@@ -187,7 +187,7 @@ class ReliabilityLayer:
 
 	def _send_packet(self, data, message_number, reliability, ordering_index, split_packet_id, split_packet_index, split_packet_count):
 		out = BitStream()
-		out.write(c_bit(len(self._acks) != 0))
+		out.write(c_bit(bool(self._acks)))
 		if self._acks:
 			out.write(c_uint(self._remote_system_time))
 			out.write(self._acks.serialize())
