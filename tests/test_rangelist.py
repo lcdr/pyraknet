@@ -8,7 +8,10 @@ class RangeListTest(unittest.TestCase):
 		self.list = RangeList()
 
 	def tearDown(self):
-		# for each testcase, also check that the serialization / deserialization match
+		# for each testcase:
+		# test that __len__ is equal to number of items returned by __iter__
+		self.assertEqual(len(list(self.list)), len(self.list))
+		# check that the serialization / deserialization match
 		stream = self.list.serialize()
 		new_list = RangeList(stream)
 		self.assertEqual(list(self.list), list(new_list))
@@ -117,3 +120,20 @@ class RangeListTest(unittest.TestCase):
 		new_list.insert(3)
 		self.assertEqual(list(new_list), [1, 2, 3, 4, 5])
 
+	def test_num_holes(self):
+		values = [1, 2, 4, 5, 8, 9, 15, 19]
+		for value in values:
+			self.list.insert(value)
+		self.assertEqual(self.list.num_holes(), 11)
+
+	def test_holes(self):
+		values = [1, 2, 4, 5, 8, 9, 15, 19]
+		for value in values:
+			self.list.insert(value)
+		self.assertEqual(list(self.list.holes()), [3, 6, 7, 10, 11, 12, 13, 14, 16, 17, 18])
+
+	def test_holes_num_holes(self):
+		values = [1, 2, 4, 5, 8, 9, 15, 19]
+		for value in values:
+			self.list.insert(value)
+		self.assertEqual(len(list(self.list.holes())), self.list.num_holes())

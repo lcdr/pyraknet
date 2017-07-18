@@ -1,8 +1,10 @@
 """
 Reliability layer. UDP doesn't guarantee delivery or ordering, so this is where RakNet provides optional support for these features.
 For retransmission algorithm see http://www.saminiir.com/lets-code-tcp-ip-stack-5-tcp-retransmission
+Congestion control is based on TCP Reno, see http://ee.lbl.gov/papers/congavoid.pdf
 """
 # Todo: combine packets in datagrams if possible
+# Todo: Congestion avoidance instead of congestion control (prevent congestion control beforehand instead of coping with it afterwards)
 import asyncio
 import logging
 import math
@@ -33,6 +35,9 @@ class ReliabilityLayer:
 		self._rto = 1  # retransmission timeout = 1 second
 		self._srtt = None  # smoothed round trip time
 		self._rtt_var = None  # round trip time variation
+		self._cwnd = 1  # congestion window, limits how many packets we can send at once
+		self._ssthresh = float("inf")  # slow start threshold, the level at which we switch from slow start to congestion control
+		self._packets_sent = 0
 		self._send_message_number_index = 0
 		self._sequenced_write_index = 0
 		self._sequenced_read_index = 0
@@ -59,20 +64,36 @@ class ReliabilityLayer:
 			if self._srtt is None:
 				self._srtt = rtt
 				self._rtt_var = rtt/2
-				self._rto = self._srtt + 4*self._rtt_var  # originally specified be at least clock resolution but since the client loop is set at 10 milliseconds there's no way it can be smaller anyways
 			else:
 				alpha = 0.125
 				beta = 0.25
 				self._rtt_var = (1 - beta) * self._rtt_var + beta * abs(self._srtt - rtt)
 				self._srtt = (1 - alpha) * self._srtt + alpha * rtt
-				self._rto = self._srtt + 4*self._rtt_var  # resolution same as above
-			self._rto = max(1, self._rto)
+			self._rto = max(1, self._srtt + 4*self._rtt_var)  # originally specified be at least clock resolution but since the client loop is set at 10 milliseconds there's no way it can be smaller anyways
 
 			acks = rangelist.RangeList(data)
 			for message_number in acks:
 				if message_number in self._resends:
 					del self._resends[message_number]
 
+			num_acks = len(acks)
+			act_num_holes = 0 # number of holes that actually correspond to resends
+			for hole in acks.holes():
+				if hole in self._resends:
+					act_num_holes += 1
+
+			if act_num_holes > 0:
+				log.info("Missing Acks/Holes: %i", act_num_holes)
+				self._ssthresh = self._cwnd/2
+				self._cwnd = self._ssthresh
+			else:
+				if self._packets_sent >= self._cwnd: # we're actually hitting the limit and not idling
+					if num_acks > self._ssthresh:
+						self._cwnd += num_acks/self._cwnd
+					else:
+						self._cwnd += num_acks
+
+			self._packets_sent = 0
 			self.last_ack_time = time.time()
 		if data.all_read():
 			return True
@@ -153,24 +174,33 @@ class ReliabilityLayer:
 			self._sends.append((data, reliability, ordering_index, None, None, None))
 
 	def _send_loop(self):
-		for packet in self._sends:
+		for message_number, resend_data in self._resends.items():
+			resend_time, packet = resend_data
+			if resend_time > time.time():
+				continue
+
+			if self._packets_sent >= self._cwnd:
+				break
+			self._packets_sent += 1
+			log.info("actually resending %i", message_number)
+
+			data, reliability, ordering_index, split_packet_id, split_packet_index, split_packet_count = packet
+			self._send_packet(data, message_number, reliability, ordering_index, split_packet_id, split_packet_index, split_packet_count)
+			if reliability == PacketReliability.Reliable or reliability == PacketReliability.ReliableOrdered:
+				self._resends[message_number] = time.time()+self._rto, packet
+
+		while self._sends:
+			if self._packets_sent >= self._cwnd:
+				break
+			packet = self._sends.pop(0)
+			self._packets_sent += 1
+
 			data, reliability, ordering_index, split_packet_id, split_packet_index, split_packet_count = packet
 			message_number = self._send_message_number_index
 			self._send_message_number_index += 1
 
 			self._send_packet(data, message_number, reliability, ordering_index, split_packet_id, split_packet_index, split_packet_count)
 
-			if reliability == PacketReliability.Reliable or reliability == PacketReliability.ReliableOrdered:
-				self._resends[message_number] = time.time()+self._rto, packet
-		self._sends.clear()
-
-		for message_number, resend_data in self._resends.items():
-			resend_time, packet = resend_data
-			if resend_time > time.time():
-				continue
-			log.info("actually resending %i", message_number)
-			data, reliability, ordering_index, split_packet_id, split_packet_index, split_packet_count = packet
-			self._send_packet(data, message_number, reliability, ordering_index, split_packet_id, split_packet_index, split_packet_count)
 			if reliability == PacketReliability.Reliable or reliability == PacketReliability.ReliableOrdered:
 				self._resends[message_number] = time.time()+self._rto, packet
 

@@ -1,8 +1,8 @@
-from collections.abc import Iterable
+from collections.abc import Iterable, Sized
 
 from .bitstream import BitStream, c_bit, c_uint, c_ushort
 
-class RangeList(Iterable):
+class RangeList(Iterable, Sized):
 	"""
 	List that stores integers and compresses them to ranges if possible.
 	To add an item, use insert.
@@ -30,6 +30,12 @@ class RangeList(Iterable):
 	def __bool__(self):
 		return bool(self._ranges)
 
+	def __len__(self):
+		len = 0
+		for min, max in self._ranges:
+			len += max - min + 1
+		return len
+
 	def __iter__(self):
 		"""Yield the numbers in the ranges, basically uncompressing the ranges."""
 		for min, max in self._ranges:
@@ -37,6 +43,24 @@ class RangeList(Iterable):
 
 	def clear(self):
 		self._ranges.clear()
+
+	def holes(self):
+		"""Yield the items 'between' the ranges."""
+		last_max = None
+		for min, max in self._ranges:
+			if last_max is not None:
+				yield from range(last_max + 1, min)
+			last_max = max
+
+	def num_holes(self):
+		"""Return the number of items 'between' the ranges."""
+		num_holes = 0
+		last_max = None
+		for min, max in self._ranges:
+			if last_max is not None:
+				num_holes += min - last_max - 1
+			last_max = max
+		return num_holes
 
 	def insert(self, item):
 		iter_ = iter(self._ranges)
