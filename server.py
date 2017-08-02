@@ -35,7 +35,7 @@ class Server:
 
 	async def init_network(self):
 		loop = asyncio.get_event_loop()
-		self._transport, protocol = await loop.create_datagram_endpoint(lambda: self, local_addr=self._address)
+		await loop.create_datagram_endpoint(lambda: self, local_addr=self._address)
 		self._address = self._transport.get_extra_info("sockname")
 
 	# Protocol methods
@@ -125,9 +125,9 @@ class Server:
 
 	# Handler stuff
 
-	def register_handler(self, packet_id, handler, origin=None):
+	def register_handler(self, packet_id, handler):
 		handlers = self.handlers.setdefault(packet_id, [])
-		handlers.append((handler, origin))
+		handlers.append(handler)
 
 	def log_packet(self, data, address, received):
 		try:
@@ -153,13 +153,11 @@ class Server:
 		self.log_packet(data, address, received=True)
 
 		handlers = self.handlers.get(self.packet_id(data), ())
-		origin_handlers = [i for i in handlers if i[1] is None or i[1] == address]
-		if not origin_handlers:
+		if not handlers:
 			log.warning("No handlers for the previously received message")
 
 		data = self.handler_data(data)
-		for handler_tuple in origin_handlers:
-			handler, origin_filter = handler_tuple
+		for handler in handlers:
 			stream = BitStream(data)
 			if asyncio.iscoroutinefunction(handler):
 				asyncio.ensure_future(handler(stream, address))
@@ -206,8 +204,3 @@ class Server:
 		log.info("Disconnect/Connection lost to %s", address)
 		self._connected[address].stop = True
 		del self._connected[address]
-		# Remove any registered handlers associated with the disconnected address
-		for packet_type in self.handlers:
-			handlers_to_remove = [handler for handler in self.handlers[packet_type] if handler[1] == address]
-			for handler in handlers_to_remove:
-				self.handlers[packet_type].remove(handler)
