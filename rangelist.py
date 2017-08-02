@@ -67,7 +67,7 @@ class RangeList(Iterable, Sized):
 		for range in iter_:
 			if range[0] == item + 1: # The item can extend the range
 				range[0] -= 1
-				break
+				return
 			if range[0] <= item:
 				if range[1] == item - 1: # The item can extend the range
 					range[1] += 1
@@ -79,16 +79,16 @@ class RangeList(Iterable, Sized):
 							self._ranges.remove(nextrange)
 					except StopIteration:
 						pass
-					break
+					return
 				if range[1] >= item: # The item is within the range, we don't even need to update it
-					break
-				continue # The item is higher than the current range, check next range
-			# If we got here, the range starts at a higher position than the item, so we should insert it now (the list is auto-sorted so there can't be any other position)
-			self._ranges.insert(self._ranges.index(range), [item, item])
-			break
-		else:
-			# We ran through the whole list and couldn't find a good existing range
-			self._ranges.append([item, item])
+					return
+			else:
+				# If we got here, the range starts at a higher position than the item, so we should insert it now (the list is auto-sorted so there can't be any other position)
+				self._ranges.insert(self._ranges.index(range), [item, item])
+				return
+
+		# We ran through the whole list and couldn't find a good existing range
+		self._ranges.append([item, item])
 
 	def serialize(self):
 		"""

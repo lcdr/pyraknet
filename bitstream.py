@@ -71,7 +71,7 @@ class BitStream(bytearray):
 		raise TypeError(arg)
 
 	def _write_str(self, str_, allocated_length, length_type):
-		# possibly include default encoded lengths for non-variable-length strings (seem to be 33 for string and 66 for wstring)
+		# possibly include default encoded length for non-variable-length strings (seems to be 33)
 		if isinstance(str_, str):
 			encoded_str = str_.encode("utf-16-le")
 		else:
@@ -88,9 +88,9 @@ class BitStream(bytearray):
 			else:
 				char_size = 1
 
-			if len(encoded_str)+char_size > allocated_length:
+			if len(str_)+1 > allocated_length:
 				raise ValueError("String too long!")
-			encoded_str += bytes(allocated_length-len(encoded_str))
+			encoded_str += bytes(allocated_length*char_size-len(encoded_str))
 		self._write_bytes(encoded_str)
 
 	def _write_bit(self, bit):
@@ -202,20 +202,22 @@ class BitStream(bytearray):
 		if length_type is not None:
 			# Variable-length string
 			length = self.read(length_type)
-			byte_str = self.read(bytes, length=length*char_size)
+			value = self.read(bytes, length=length*char_size)
 		else:
 			# Fixed-length string
-			byte_str = bytearray()
-			while len(byte_str) < allocated_length:
-				char = self._read_bytes(char_size)
-				if sum(char) == 0:
-					self.skip_read(allocated_length - len(byte_str) - char_size)
+			value = self._read_bytes(allocated_length*char_size)
+			# find null terminator
+			for i in range(len(value)):
+				char = value[i*char_size:(i+1)*char_size]
+				if char == bytes(char_size):
+					value = value[:i*char_size]
 					break
-				byte_str += char
+			else:
+				raise RuntimeError("String doesn't have null terminator")
 
 		if issubclass(arg_type, str):
-			return byte_str.decode("utf-16-le")
-		return byte_str
+			value = value.decode("utf-16-le")
+		return value
 
 	def _read_bit(self):
 		bit = self[self._read_offset//8] & 0x80 >> self._read_offset % 8 != 0
@@ -234,9 +236,17 @@ class BitStream(bytearray):
 
 	def _read_bytes(self, length):
 		if self._read_offset % 8 == 0:
-			output = self[self._read_offset//8:self._read_offset//8+length]
+			num_bytes_read = length
 		else:
-			output = self[self._read_offset//8:self._read_offset//8+length+1]
+			num_bytes_read = length+1
+
+		# check whether there is enough left to read
+		if len(self) - self._read_offset//8 < num_bytes_read:
+			raise EOFError("Trying to read %i bytes but only %i remain" % (num_bytes_read, len(self) - self._read_offset//8))
+
+		output = self[self._read_offset//8:self._read_offset//8+num_bytes_read]
+		if self._read_offset % 8 != 0:
+			# data is shifted
 			# clear the part before the struct
 			output[0] &= (1 << 8-self._read_offset%8) - 1
 			# shift back

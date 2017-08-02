@@ -72,6 +72,7 @@ class Server:
 		# close connections that haven't sent acks in the last 10 seconds
 		for address, layer in self._connected.copy().items():
 			if layer._resends and layer.last_ack_time < time.time() - 10:
+				log.info("Connection to %s probably dead - closing connection" % address)
 				self.close_connection(address)
 		asyncio.get_event_loop().call_later(10, self._check_connections)
 
