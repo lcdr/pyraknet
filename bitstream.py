@@ -70,7 +70,15 @@ class BitStream(bytearray):
 
 		raise TypeError(arg)
 
-	def _write_str(self, str_, allocated_length, length_type):
+	def _check_alloc_length(self, allocated_length: int):
+		if allocated_length is not None:
+			if not isinstance(allocated_length, int):
+				raise TypeError("Allocated length must be integer")
+			if allocated_length <= 0:
+				raise ValueError("Allocated length of %i doesn't make sense" % allocated_length)
+
+	def _write_str(self, str_, allocated_length: int, length_type):
+		self._check_alloc_length(allocated_length)
 		# possibly include default encoded length for non-variable-length strings (seems to be 33)
 		if isinstance(str_, str):
 			encoded_str = str_.encode("utf-16-le")
@@ -193,7 +201,8 @@ class BitStream(bytearray):
 			return output
 		raise TypeError(arg_type)
 
-	def _read_str(self, arg_type, allocated_length, length_type):
+	def _read_str(self, arg_type, allocated_length: int, length_type):
+		self._check_alloc_length(allocated_length)
 		if issubclass(arg_type, str):
 			char_size = 2
 		else:
