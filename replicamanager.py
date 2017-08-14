@@ -33,7 +33,7 @@ class ReplicaManager:
 		out.write(c_ubyte(Message.ReplicaManagerConstruction))
 		out.write(c_bit(True))
 		out.write(c_ushort(self._network_ids[obj]))
-		out.write(obj.send_construction())
+		out.write(obj.write_construction())
 
 		for recipient in recipients:
 			self.send(out, recipient)
@@ -58,3 +58,21 @@ class ReplicaManager:
 			self.send(out, participant)
 
 		del self._network_ids[obj]
+
+class Replica:
+	def write_construction(self):
+		"""
+		This is where the object should write data to be sent on construction.
+		Return the bitstream you wrote to.
+		"""
+
+	def serialize(self):
+		"""
+		This is where the object should write data to be sent on serialization.
+		Return the bitstream you wrote to.
+		"""
+
+	def on_destruction(self):
+		"""
+		This will be called by the ReplicaManager before the Destruction message is sent.
+		"""
