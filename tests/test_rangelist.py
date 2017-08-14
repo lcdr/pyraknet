@@ -11,6 +11,12 @@ class RangeListTest(unittest.TestCase):
 		# for each testcase:
 		# test that __len__ is equal to number of items returned by __iter__
 		self.assertEqual(len(list(self.list)), len(self.list))
+		# test that all items returned by iter are contained
+		for item in self.list:
+			self.assertTrue(item in self.list)
+		# test that all items returned by holes are not contained
+		for item in self.list.holes():
+			self.assertFalse(item in self.list)
 		# check that the serialization / deserialization match
 		stream = self.list.serialize()
 		new_list = RangeList(stream)

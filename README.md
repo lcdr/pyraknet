@@ -15,7 +15,7 @@ Python implementation of RakNet 3.25. This is not aimed to be a complete port of
 * (BitStream) Compressed floats/doubles
 
 #### Requirements:
-* Python 3.5
+* Python 3.6
 
 ### Sample server setup
 Run python -m pyraknet or execute \_\_main\_\_.py to start a sample server that will send packets manually, from ./packets/

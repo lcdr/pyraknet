@@ -1,12 +1,13 @@
 import math
 import struct
+from typing import AnyStr
 
 class Struct(struct.Struct):
 	# cast-like syntax for packing
-	def __call__(self, value):
+	def __call__(self, value) -> bytes:
 		return self.pack(value)
 
-	def __str__(self):
+	def __str__(self) -> str:
 		return "<Struct %s>" % self.format
 
 c_bool = Struct("<?")
@@ -45,7 +46,12 @@ class BitStream(bytearray):
 		self._write_offset = len(self) * 8
 		self._read_offset = 0
 
-	def write(self, arg, compressed=False, allocated_length:"for fixed-length strings"=None, length_type:"for variable-length strings"=None):
+	def write(self, arg, compressed: bool=False, allocated_length:int=None, length_type=None) -> None:
+		"""
+		Write a value to the bitstream.
+		allocated_length is for fixed-length strings.
+		length_type is for variable-length strings.
+		"""
 		if isinstance(arg, BitStream):
 			self._write_bytes(arg)
 			if arg._write_offset % 8 != 0:
@@ -70,15 +76,7 @@ class BitStream(bytearray):
 
 		raise TypeError(arg)
 
-	def _check_alloc_length(self, allocated_length: int):
-		if allocated_length is not None:
-			if not isinstance(allocated_length, int):
-				raise TypeError("Allocated length must be integer")
-			if allocated_length <= 0:
-				raise ValueError("Allocated length of %i doesn't make sense" % allocated_length)
-
-	def _write_str(self, str_, allocated_length: int, length_type):
-		self._check_alloc_length(allocated_length)
+	def _write_str(self, str_: AnyStr, allocated_length: int, length_type) -> None:
 		# possibly include default encoded length for non-variable-length strings (seems to be 33)
 		if isinstance(str_, str):
 			encoded_str = str_.encode("utf-16-le")
@@ -101,14 +99,14 @@ class BitStream(bytearray):
 			encoded_str += bytes(allocated_length*char_size-len(encoded_str))
 		self._write_bytes(encoded_str)
 
-	def _write_bit(self, bit):
+	def _write_bit(self, bit: bool) -> None:
 		self._alloc_bits(1)
 		if bit: # we don't actually have to do anything if the bit is 0
 			self[self._write_offset//8] |= 0x80 >> self._write_offset % 8
 
 		self._write_offset += 1
 
-	def write_bits(self, value, number_of_bits):
+	def write_bits(self, value: int, number_of_bits: int) -> None:
 		assert 0 < number_of_bits < 8
 		self._alloc_bits(number_of_bits)
 
@@ -123,7 +121,7 @@ class BitStream(bytearray):
 
 		self._write_offset += number_of_bits
 
-	def _write_bytes(self, byte_arg):
+	def _write_bytes(self, byte_arg: bytes) -> None:
 		if self._write_offset % 8 == 0:
 			self[self._write_offset//8:self._write_offset//8+len(byte_arg)] = byte_arg
 		else:
@@ -135,7 +133,7 @@ class BitStream(bytearray):
 			self[self._write_offset//8+1:self._write_offset//8+1+len(byte_arg)] = new[1:]
 		self._write_offset += len(byte_arg)*8
 
-	def _write_compressed(self, byte_arg):
+	def _write_compressed(self, byte_arg: bytes) -> None:
 		current_byte = len(byte_arg) - 1
 
 		# Write upper bytes with a single 1
@@ -158,21 +156,25 @@ class BitStream(bytearray):
 		else:
 			self._write_bytes(byte_arg[:1])
 
-	def align_write(self):
+	def align_write(self) -> None:
 		if self._write_offset % 8 != 0:
 			self._alloc_bits(8 - self._write_offset % 8)
 			self._write_offset += 8 - self._write_offset % 8
 
-	def _alloc_bits(self, number_of_bits):
+	def _alloc_bits(self, number_of_bits: int) -> None:
 		bytes_to_allocate = math.ceil((self._write_offset + number_of_bits) / 8) - len(self)
 		if bytes_to_allocate > 0:
 			self += bytes(bytes_to_allocate)
 
-
-	def skip_read(self, byte_length):
+	def skip_read(self, byte_length: int) -> None:
 		self._read_offset += byte_length * 8
 
-	def read(self, arg_type, compressed=False, length:"for BitStream (in bits) and for bytes (in bytes)"=None, allocated_length:"for fixed-length strings"=None, length_type:"for variable-length strings"=None):
+	def read(self, arg_type, compressed=False, length: int=None, allocated_length: int=None, length_type=None):
+		"""
+		Read a value of type arg_type from the bitstream.
+		allocated_length is for fixed-length strings.
+		length_type is for variable-length strings.
+		"""
 		if isinstance(arg_type, struct.Struct):
 			if compressed:
 				if arg_type in (c_float, c_double):
@@ -201,8 +203,7 @@ class BitStream(bytearray):
 			return output
 		raise TypeError(arg_type)
 
-	def _read_str(self, arg_type, allocated_length: int, length_type):
-		self._check_alloc_length(allocated_length)
+	def _read_str(self, arg_type, allocated_length: int, length_type) -> AnyStr:
 		if issubclass(arg_type, str):
 			char_size = 2
 		else:
@@ -228,12 +229,12 @@ class BitStream(bytearray):
 			value = value.decode("utf-16-le")
 		return value
 
-	def _read_bit(self):
+	def _read_bit(self) -> bool:
 		bit = self[self._read_offset//8] & 0x80 >> self._read_offset % 8 != 0
 		self._read_offset += 1
 		return bit
 
-	def read_bits(self, number_of_bits):
+	def read_bits(self, number_of_bits: int) -> int:
 		assert 0 < number_of_bits < 8
 
 		output = (self[self._read_offset//8] << self._read_offset % 8) & 0xff # First half
@@ -243,7 +244,7 @@ class BitStream(bytearray):
 		self._read_offset += number_of_bits
 		return output
 
-	def _read_bytes(self, length):
+	def _read_bytes(self, length: int) -> bytes:
 		if self._read_offset % 8 == 0:
 			num_bytes_read = length
 		else:
@@ -263,7 +264,7 @@ class BitStream(bytearray):
 		self._read_offset += length*8
 		return output
 
-	def _read_compressed(self, number_of_bytes):
+	def _read_compressed(self, number_of_bytes: int) -> bytes:
 		current_byte = number_of_bytes - 1
 
 		while current_byte > 0:
@@ -281,10 +282,10 @@ class BitStream(bytearray):
 			start = self._read_bytes(1)
 		return start + bytearray(number_of_bytes - current_byte - 1)
 
-	def align_read(self):
+	def align_read(self) -> None:
 		if self._read_offset % 8 != 0:
 			self._read_offset += 8 - self._read_offset % 8
 
-	def all_read(self):
+	def all_read(self) -> bool:
 		# This is not accurate to the bit, just to the byte
 		return math.ceil(self._read_offset / 8) == len(self)

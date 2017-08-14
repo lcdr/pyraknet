@@ -26,15 +26,6 @@ class StringTest:
 		else:
 			cls.CHAR_SIZE = 1
 
-	def test_allocated_bad_length(self):
-		for func, param in ((self.stream.write, self.STRING), (self.stream.read, type(self.STRING))):
-			with self.subTest():
-				with self.assertRaises(TypeError):
-					func(param, allocated_length=22.5)
-			with self.subTest():
-				with self.assertRaises(ValueError):
-					func(param, allocated_length=-5)
-
 	def test_write_allocated(self):
 		self.stream.write(self.STRING, allocated_length=len(self.STRING)+10)
 		if isinstance(self.STRING, str):
