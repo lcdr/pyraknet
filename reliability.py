@@ -44,6 +44,7 @@ class ReliabilityLayer:
 		self._ordered_write_index = 0
 		self._ordered_read_index = 0
 		self._out_of_order_packets = {}  # for ReliableOrdered
+		self._split_packet_queue = {}
 		self._sends = []
 		self._resends = OrderedDict()
 
@@ -114,7 +115,9 @@ class ReliabilityLayer:
 
 			is_split_packet = data.read(c_bit)
 			if is_split_packet:
-				raise NotImplementedError
+				split_packet_id = data.read(c_ushort)
+				split_packet_index = data.read(c_uint, compressed=True)
+				split_packet_count = data.read(c_uint, compressed=True)
 
 			length = data.read(c_ushort, compressed=True)
 			data.align_read()
@@ -122,6 +125,22 @@ class ReliabilityLayer:
 
 			if reliability in (PacketReliability.Reliable, PacketReliability.ReliableOrdered):
 				self._acks.insert(message_number)
+
+			if is_split_packet:
+				if not split_packet_id in self._split_packet_queue:
+					self._split_packet_queue[split_packet_id] = [None]*split_packet_count
+				self._split_packet_queue[split_packet_id][split_packet_index] = packet_data
+				# check if packet is ready yet
+				ready = True
+				for packet_part in self._split_packet_queue[split_packet_id]:
+					if packet_part is None:
+						ready = False
+						break
+				if ready:
+					packet_data = b"".join(self._split_packet_queue[split_packet_id])
+					del self._split_packet_queue[split_packet_id]
+				else:
+					continue
 
 			if reliability == PacketReliability.UnreliableSequenced:
 				if ordering_index >= self._sequenced_read_index:
