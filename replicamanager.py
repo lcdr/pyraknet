@@ -7,7 +7,9 @@ from .messages import Message
 log = logging.getLogger(__name__)
 
 class ReplicaManager:
-	def __init__(self):
+	def __init__(self, server):
+		self._server = server
+		self._server.register_handler(Message.DisconnectionNotification, self.on_disconnect_or_connection_lost)
 		self._participants = set()
 		self._network_ids = {}
 		self._current_network_id = 0
@@ -36,7 +38,7 @@ class ReplicaManager:
 		out.write(obj.write_construction())
 
 		for recipient in recipients:
-			self.send(out, recipient)
+			self._server.send(out, recipient)
 
 	def serialize(self, obj):
 		out = BitStream()
@@ -45,7 +47,7 @@ class ReplicaManager:
 		out.write(obj.serialize())
 
 		for participant in self._participants:
-			self.send(out, participant)
+			self._server.send(out, participant)
 
 	def destruct(self, obj):
 		log.debug("destructing %s", obj)
@@ -55,7 +57,7 @@ class ReplicaManager:
 		out.write(c_ushort(self._network_ids[obj]))
 
 		for participant in self._participants:
-			self.send(out, participant)
+			self._server.send(out, participant)
 
 		del self._network_ids[obj]
 
