@@ -136,7 +136,7 @@ class Server:
 			console_log = packetname not in self.not_console_logged_packets
 		except ValueError:
 			packetname = self.unknown_packetname(data)
-			file_log = True
+			file_log = False
 			console_log = True
 
 		if file_log:

@@ -16,6 +16,10 @@ from .bitstream import BitStream, c_bit, c_uint, c_ushort
 
 log = logging.getLogger(__name__)
 
+MTU_SIZE = 1492  # Default used by RakNet, Ethernet
+MTU_SIZE = 1228  # Hardcoded by LU for some reason
+UDP_HEADER_SIZE = 28
+
 class PacketReliability:
 	Unreliable = 0
 	UnreliableSequenced = 1
@@ -177,11 +181,11 @@ class ReliabilityLayer:
 		else:
 			ordering_index = None
 
-		if ReliabilityLayer.packet_header_length(reliability, False) + len(data) >= 1492 - 28:  # mtu - udp header
+		if ReliabilityLayer.packet_header_length(reliability, False) + len(data) >= MTU_SIZE - UDP_HEADER_SIZE:
 			data_offset = 0
 			chunks = []
 			while data_offset < len(data):
-				data_length = 1492 - 28 - ReliabilityLayer.packet_header_length(reliability, True)
+				data_length = MTU_SIZE - UDP_HEADER_SIZE - ReliabilityLayer.packet_header_length(reliability, True)
 				chunks.append(data[data_offset:data_offset+data_length])
 				data_offset += data_length
 
@@ -242,7 +246,7 @@ class ReliabilityLayer:
 			out.write(self._acks.serialize())
 			self._acks.clear()
 
-		assert len(out) + ReliabilityLayer.packet_header_length(reliability, split_packet_id is not None) + len(data) < 1492
+		assert ReliabilityLayer.packet_header_length(reliability, split_packet_id is not None) + len(data) <= MTU_SIZE - UDP_HEADER_SIZE
 
 		has_remote_system_time = True
 		out.write(c_bit(has_remote_system_time))
@@ -266,7 +270,6 @@ class ReliabilityLayer:
 		out.align_write()
 		out.write(data)
 
-		assert len(out) < 1492  # maximum packet size handled by raknet
 		self._transport.sendto(out, self._address)
 
 	@staticmethod
