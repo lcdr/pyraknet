@@ -46,7 +46,7 @@ class BitStream(bytearray):
 		self._write_offset = len(self) * 8
 		self._read_offset = 0
 
-	def write(self, arg, compressed: bool=False, allocated_length:int=None, length_type=None) -> None:
+	def write(self, arg, compressed: bool=False, allocated_length: int=None, length_type=None) -> None:
 		"""
 		Write a value to the bitstream.
 		allocated_length is for fixed-length strings.
@@ -190,7 +190,6 @@ class BitStream(bytearray):
 		if issubclass(arg_type, bytes):
 			return self._read_bytes(length)
 		if issubclass(arg_type, BitStream):
-			r = self._read_offset
 			output = BitStream(self._read_bytes(length//8))
 			if length % 8 != 0:
 				endbyte = (self[self._read_offset//8] << self._read_offset % 8) & 0xff

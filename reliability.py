@@ -131,7 +131,7 @@ class ReliabilityLayer:
 				self._acks.insert(message_number)
 
 			if is_split_packet:
-				if not split_packet_id in self._split_packet_queue:
+				if split_packet_id not in self._split_packet_queue:
 					self._split_packet_queue[split_packet_id] = [None]*split_packet_count
 				self._split_packet_queue[split_packet_id][split_packet_index] = packet_data
 				# check if packet is ready yet
@@ -150,7 +150,7 @@ class ReliabilityLayer:
 				if ordering_index >= self._sequenced_read_index:
 					self._sequenced_read_index = ordering_index + 1
 				else:
-					log.warn("got duplicate")
+					log.warning("got duplicate")
 					continue
 			elif reliability == PacketReliability.ReliableOrdered:
 				if ordering_index == self._ordered_read_index:
@@ -162,7 +162,7 @@ class ReliabilityLayer:
 						yield self._out_of_order_packets.pop(ord)
 						ord += 1
 				elif ordering_index < self._ordered_read_index:
-					log.warn("got duplicate")
+					log.warning("got duplicate")
 					continue
 				else:
 					# Packet arrived too early, we're still waiting for a previous packet

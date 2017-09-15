@@ -19,6 +19,7 @@ class GeneralTest(BitStreamTest):
 
 class StringTest:
 	STRING = None
+
 	@classmethod
 	def setUpClass(cls):
 		if isinstance(cls.STRING, str):

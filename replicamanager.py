@@ -1,4 +1,3 @@
-import asyncio
 import logging
 
 from .bitstream import BitStream, c_bit, c_ubyte, c_ushort

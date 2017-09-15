@@ -97,7 +97,7 @@ class Server:
 		if address is None:
 			raise ValueError
 		if address not in self._connected:
-			log.error("Sending to someone we are not connected to!")
+			log.error("Tried sending %s to %s but we are not connected!" % (data, address))
 			return
 		self.log_packet(data, address, received=False)
 		self._connected[address].send(data, reliability)
@@ -127,7 +127,7 @@ class Server:
 
 	def register_handler(self, packet_id, handler):
 		handlers = self.handlers.setdefault(packet_id, [])
-		handlers.append(handler)
+		handlers.insert(0, handler)
 
 	def log_packet(self, data, address, received):
 		try:
