@@ -1,4 +1,11 @@
-Python implementation of RakNet 3.25. This is not aimed to be a complete port of RakNet, just everything that's needed to run a server.
+# pyraknet
+## A Python implementation of RakNet 3.25.
+### Created by lcdr
+### Source repository at https://bitbucket.org/lcdr/pyraknet/
+### License: GPL v3
+
+
+This is not aimed to be a complete port of RakNet, just everything that's needed to run a server.
 
 #### Not implemented:
 
@@ -25,5 +32,3 @@ Run python -m pyraknet or execute \_\_main\_\_.py to start a sample server that 
 To send something, place your packets in ./packets/<your subfolder> and enter the subfolder name in the command line.
 
 The server logs incoming and outgoing packets in ./logs/, if you get errors you might have to create the directory (and possibly subdirectories).
-
-## License: GPL v3

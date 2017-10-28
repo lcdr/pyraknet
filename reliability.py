@@ -47,6 +47,7 @@ class ReliabilityLayer:
 		self._sequenced_read_index = 0
 		self._ordered_write_index = 0
 		self._ordered_read_index = 0
+		self._last_rel_received = [-1] * 20
 		self._out_of_order_packets = {}  # for ReliableOrdered
 		self._split_packet_queue = {}
 		self._sends = []
@@ -146,11 +147,33 @@ class ReliabilityLayer:
 				else:
 					continue
 
+			# Duplicate packet checks and ordering
+			# Depending on reliability type:
+			# Unreliable & Unreliable Sequenced:
+			# Since unreliable packets are not resent, there can't be any duplicates. No checks needed.
+			# Reliable:
+			# Reliable.* packets are resent, therefore we need to check for duplicates. Reliable (no ordering or sequencing) packets also don't have an easy way of detecting duplicates, since they may arrive out of order.
+			# Simplest solution is to just keep a list of the last received reliable message numbers, and check packets against the list. If they're included, they will be detected as duplicate.
+			# Note that the failure rate of this method depends on list size vs packet frequency.
+			# Keeping a list of "missing" message numbers doesn't work too well because raknet is stupid and assigns message numbers to unreliable packets which don't even need them.
+			# Reliable Ordered:
+			# Reliable Ordered packets need to be checked for order, which as a side effect can detect duplicates. No extra duplicate detection needed.
+			# Reliable Sequenced:
+			# Is not used, but if it were, it would be handled similarly to Reliable Ordered.
+
+			if reliability == PacketReliability.Reliable:
+				if message_number not in self._last_rel_received:
+					del self._last_rel_received[0]
+					self._last_rel_received.append(message_number)
+				else:
+					log.info("detected reliable duplicate")
+					continue
+
 			if reliability == PacketReliability.UnreliableSequenced:
 				if ordering_index >= self._sequenced_read_index:
 					self._sequenced_read_index = ordering_index + 1
 				else:
-					log.warning("got duplicate")
+					# sequenced means ignore older packets
 					continue
 			elif reliability == PacketReliability.ReliableOrdered:
 				if ordering_index == self._ordered_read_index:
@@ -162,7 +185,7 @@ class ReliabilityLayer:
 						yield self._out_of_order_packets.pop(ord)
 						ord += 1
 				elif ordering_index < self._ordered_read_index:
-					log.warning("got duplicate")
+					log.info("detected reliable ordered duplicate")
 					continue
 				else:
 					# Packet arrived too early, we're still waiting for a previous packet
