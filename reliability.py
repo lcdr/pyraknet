@@ -31,6 +31,7 @@ class ReliabilityLayer:
 	def __init__(self, transport, address):
 		self.stop = False
 		self.last_ack_time = 0
+		self._start_time = int(time.perf_counter() * 1000)
 		self._split_packet_id = 0
 		self._remote_system_time = 0
 		self._transport = transport
@@ -273,7 +274,7 @@ class ReliabilityLayer:
 
 		has_remote_system_time = True
 		out.write(c_bit(has_remote_system_time))
-		out.write(c_uint(int(time.perf_counter() * 1000)))
+		out.write(c_uint(int(time.perf_counter() * 1000) - self._start_time))
 
 		out.write(c_uint(message_number))
 

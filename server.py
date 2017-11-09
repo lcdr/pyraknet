@@ -18,6 +18,7 @@ class Server:
 
 		self.max_connections = max_connections
 		self.incoming_password = incoming_password
+		self._start_time = int(time.perf_counter() * 1000)
 		self._connected = {}
 		self.handlers = {}
 		self.not_console_logged_packets = set(("InternalPing", "ConnectedPong"))
@@ -197,7 +198,7 @@ class Server:
 		pong = BitStream()
 		pong.write(c_ubyte(Message.ConnectedPong))
 		pong.write(ping_send_time)
-		pong.write(c_uint(int(time.perf_counter() * 1000)))
+		pong.write(c_uint(int(time.perf_counter() * 1000) - self._start_time))
 		self.send(pong, address, PacketReliability.Unreliable)
 
 	def on_disconnect_or_connection_lost(self, data, address):
