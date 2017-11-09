@@ -155,7 +155,11 @@ class Server:
 
 		handlers = self.handlers.get(self.packet_id(data), ())
 		if not handlers:
-			log.warning("No handlers for the previously received message")
+			try:
+				packetname = self.packetname(data)
+			except ValueError:
+				packetname = self.unknown_packetname(data)
+			log.info("No handlers for %s", packetname)
 
 		data = self.handler_data(data)
 		for handler in handlers:

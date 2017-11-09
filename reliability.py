@@ -67,7 +67,7 @@ class ReliabilityLayer:
 		has_acks = data.read(c_bit)
 		if has_acks:
 			old_time = data.read(c_uint)
-			rtt = time.perf_counter() - old_time/1000
+			rtt = time.perf_counter() - self._start_time/1000 - old_time/1000
 			if self._srtt is None:
 				self._srtt = rtt
 				self._rtt_var = rtt/2
