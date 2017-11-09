@@ -101,7 +101,7 @@ class ReliabilityLayer:
 						self._cwnd += num_acks
 
 			self._packets_sent = 0
-			self.last_ack_time = time.time()
+			self.last_ack_time = time.perf_counter()
 		if data.all_read():
 			return True
 		has_remote_system_time = data.read(c_bit)
@@ -223,7 +223,7 @@ class ReliabilityLayer:
 	def _send_loop(self):
 		for message_number, resend_data in self._resends.items():
 			resend_time, packet = resend_data
-			if resend_time > time.time():
+			if resend_time > time.perf_counter():
 				continue
 
 			if self._packets_sent >= self._cwnd:
@@ -234,7 +234,7 @@ class ReliabilityLayer:
 			data, reliability, ordering_index, split_packet_id, split_packet_index, split_packet_count = packet
 			self._send_packet(data, message_number, reliability, ordering_index, split_packet_id, split_packet_index, split_packet_count)
 			if reliability == PacketReliability.Reliable or reliability == PacketReliability.ReliableOrdered:
-				self._resends[message_number] = time.time()+self._rto, packet
+				self._resends[message_number] = time.perf_counter()+self._rto, packet
 
 		while self._sends:
 			if self._packets_sent >= self._cwnd:
@@ -249,7 +249,7 @@ class ReliabilityLayer:
 			self._send_packet(data, message_number, reliability, ordering_index, split_packet_id, split_packet_index, split_packet_count)
 
 			if reliability == PacketReliability.Reliable or reliability == PacketReliability.ReliableOrdered:
-				self._resends[message_number] = time.time()+self._rto, packet
+				self._resends[message_number] = time.perf_counter()+self._rto, packet
 
 		if self._acks:
 			out = BitStream()
