@@ -1,4 +1,10 @@
+"""
+System for automatically broadcasting object creation, destruction and data updates to connected players.
+See RakNet's ReplicaManager.
+"""
+
 import logging
+from abc import ABC, abstractmethod
 
 from .bitstream import BitStream, c_bit, c_ubyte, c_ushort
 from .messages import Message
@@ -6,22 +12,38 @@ from .messages import Message
 log = logging.getLogger(__name__)
 
 class ReplicaManager:
-	def __init__(self, server):
+	"""
+	Handles broadcasting updates of objects to connected players.
+	"""
+
+	def __init__(self, server: "pyraknet.server.Server"):
 		self._server = server
-		self._server.register_handler(Message.DisconnectionNotification, self.on_disconnect_or_connection_lost)
+		self._server.register_handler(Message.DisconnectionNotification, self._on_disconnect_or_connection_lost)
 		self._participants = set()
 		self._network_ids = {}
 		self._current_network_id = 0
 
 	def add_participant(self, address):
+		"""
+		Add a participant to which object updates will be broadcast to.
+		Updates won't automatically be sent to all connected players, just the ones added via this method.
+		Disconnected players will automatically be removed from the list when they disconnect.
+		Newly added players will receive construction messages for all objects are currently registered with the manager (construct has been called and destruct hasn't been called yet).
+		"""
 		self._participants.add(address)
 		for obj in self._network_ids:
-			self.construct(obj, (address,), new=False)
+			self._construct(obj, new=False, recipients=(address,))
 
-	def on_disconnect_or_connection_lost(self, data, address):
-		self._participants.discard(address)
+	def construct(self, obj: "Replica", new=True):
+		"""
+		Send a construction message to participants.
 
-	def construct(self, obj, recipients=None, new=True):
+		The object is registered and participants joining later will also receive a construction message when they join (if the object hasn't been destructed in the meantime).
+		The actual content of the construction message is determined by the object's write_construction method.
+		"""
+		self._construct(obj, new)
+
+	def _construct(self, obj: "Replica", new=True, recipients=None):
 		# recipients is needed to send replicas to new participants
 		if recipients is None:
 			recipients = self._participants
@@ -39,7 +61,13 @@ class ReplicaManager:
 		for recipient in recipients:
 			self._server.send(out, recipient)
 
-	def serialize(self, obj):
+	def serialize(self, obj: "Replica"):
+		"""
+		Send a serialization message to participants.
+
+		The actual content of the construction message is determined by the object's serialize method.
+		Note that the manager does not automatically send a serialization message when some part of your object changes - you have to call this function explicitly.
+		"""
 		out = BitStream()
 		out.write(c_ubyte(Message.ReplicaManagerSerialize))
 		out.write(c_ushort(self._network_ids[obj]))
@@ -48,7 +76,13 @@ class ReplicaManager:
 		for participant in self._participants:
 			self._server.send(out, participant)
 
-	def destruct(self, obj):
+	def destruct(self, obj: "Replica"):
+		"""
+		Send a destruction message to participants.
+
+		Before the message is actually sent, the object's on_destruction method is called.
+		This message also deregisters the object from the manager so that it won't be broadcast afterwards.
+		"""
 		log.debug("destructing %s", obj)
 		obj.on_destruction()
 		out = BitStream()
@@ -60,20 +94,27 @@ class ReplicaManager:
 
 		del self._network_ids[obj]
 
-class Replica:
-	def write_construction(self):
+	def _on_disconnect_or_connection_lost(self, data, address):
+		self._participants.discard(address)
+
+class Replica(ABC):
+	"""Abstract base class for replicas (objects serialized using the replica manager system)."""
+
+	@abstractmethod
+	def write_construction(self) -> BitStream:
 		"""
 		This is where the object should write data to be sent on construction.
 		Return the bitstream you wrote to.
 		"""
 
-	def serialize(self):
+	@abstractmethod
+	def serialize(self) -> BitStream:
 		"""
 		This is where the object should write data to be sent on serialization.
 		Return the bitstream you wrote to.
 		"""
 
-	def on_destruction(self):
+	def on_destruction(self) -> None:
 		"""
-		This will be called by the ReplicaManager before the Destruction message is sent.
+		This will be called by the ReplicaManager before the destruction message is sent.
 		"""
