@@ -1,6 +1,6 @@
 from typing import Collection, Iterator, List
 
-from .bitstream import BitStream, c_bit, c_uint, c_ushort
+from .bitstream import c_bit, c_uint, c_ushort, ReadStream, WriteStream
 
 class _Range:
 	__slots__ = "min", "max"
@@ -20,7 +20,7 @@ class RangeList(Collection[int]):
 		Ranges in the internal representation are inclusive from both ends (that is, (20, 25) contains both 20 and 25 and everything in between)
 	"""
 
-	def __init__(self, input_stream: BitStream=None):
+	def __init__(self, input_stream: ReadStream=None):
 		"""Init the rangelist, optionally by deserializing from a bitstream."""
 		self._ranges: List[_Range] = []
 		if input_stream is not None:
@@ -106,12 +106,12 @@ class RangeList(Collection[int]):
 		# We ran through the whole list and couldn't find a good existing range
 		self._ranges.append(_Range(item, item))
 
-	def serialize(self) -> BitStream:
+	def serialize(self) -> WriteStream:
 		"""
 		Serialize the RangeList. This is meant to be compatible with RakNet's serialization.
 		(This currently serializes items as uints, since currently the only occurrence where I need to serialize a rangelist is with an uint)
 		"""
-		out = BitStream()
+		out = WriteStream()
 		out.write(c_ushort(len(self._ranges)), compressed=True)
 		for range in self._ranges:
 			out.write(c_bit(range.min == range.max))

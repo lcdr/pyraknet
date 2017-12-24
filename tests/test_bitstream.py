@@ -1,12 +1,22 @@
 import unittest
 
-from pyraknet.bitstream import BitStream
+from pyraknet.bitstream import ReadStream, WriteStream
+
+class _BitStream(WriteStream, ReadStream):
+	def __init__(self, data=None):
+		super().__init__(data)
+		self.read_offset = 0
 
 class BitStreamTest(unittest.TestCase):
 	def setUp(self):
-		self.stream = BitStream()
+		self.stream = _BitStream()
 
 class GeneralTest(BitStreamTest):
+	def test_len(self):
+		string = b"hello world"
+		self.stream.write(string)
+		self.assertEqual(len(self.stream), len(string))
+
 	def test_read_bytes_too_much(self):
 		with self.assertRaises(EOFError):
 			self.stream.read(bytes, length=2)
@@ -33,7 +43,7 @@ class StringTest:
 			encoded = self.STRING.encode("utf-16-le")
 		else:
 			encoded = self.STRING
-		self.assertEqual(self.stream, encoded+bytes((len(self.STRING)+10)*self.CHAR_SIZE-len(encoded)))
+		self.assertEqual(self.stream._data, encoded+bytes((len(self.STRING)+10)*self.CHAR_SIZE-len(encoded)))
 
 	def test_write_allocated_long(self):
 		with self.assertRaises(ValueError):

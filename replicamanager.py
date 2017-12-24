@@ -6,8 +6,9 @@ See RakNet's ReplicaManager.
 import logging
 from abc import ABC, abstractmethod
 
-from .bitstream import BitStream, c_bit, c_ubyte, c_ushort
+from .bitstream import c_bit, c_ubyte, c_ushort, WriteStream
 from .messages import Message
+from .server import Server
 
 log = logging.getLogger(__name__)
 
@@ -16,7 +17,7 @@ class ReplicaManager:
 	Handles broadcasting updates of objects to connected players.
 	"""
 
-	def __init__(self, server: "pyraknet.server.Server"):
+	def __init__(self, server: Server):
 		self._server = server
 		self._server.register_handler(Message.DisconnectionNotification, self._on_disconnect_or_connection_lost)
 		self._participants = set()
@@ -52,7 +53,7 @@ class ReplicaManager:
 			self._network_ids[obj] = self._current_network_id
 			self._current_network_id += 1
 
-		out = BitStream()
+		out = WriteStream()
 		out.write(c_ubyte(Message.ReplicaManagerConstruction))
 		out.write(c_bit(True))
 		out.write(c_ushort(self._network_ids[obj]))
@@ -68,7 +69,7 @@ class ReplicaManager:
 		The actual content of the construction message is determined by the object's serialize method.
 		Note that the manager does not automatically send a serialization message when some part of your object changes - you have to call this function explicitly.
 		"""
-		out = BitStream()
+		out = WriteStream()
 		out.write(c_ubyte(Message.ReplicaManagerSerialize))
 		out.write(c_ushort(self._network_ids[obj]))
 		out.write(obj.serialize())
@@ -85,7 +86,7 @@ class ReplicaManager:
 		"""
 		log.debug("destructing %s", obj)
 		obj.on_destruction()
-		out = BitStream()
+		out = WriteStream()
 		out.write(c_ubyte(Message.ReplicaManagerDestruction))
 		out.write(c_ushort(self._network_ids[obj]))
 
@@ -101,14 +102,14 @@ class Replica(ABC):
 	"""Abstract base class for replicas (objects serialized using the replica manager system)."""
 
 	@abstractmethod
-	def write_construction(self) -> BitStream:
+	def write_construction(self) -> WriteStream:
 		"""
 		This is where the object should write data to be sent on construction.
 		Return the bitstream you wrote to.
 		"""
 
 	@abstractmethod
-	def serialize(self) -> BitStream:
+	def serialize(self) -> WriteStream:
 		"""
 		This is where the object should write data to be sent on serialization.
 		Return the bitstream you wrote to.

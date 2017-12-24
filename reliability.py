@@ -12,7 +12,7 @@ import time
 from collections import OrderedDict
 
 from . import rangelist
-from .bitstream import BitStream, c_bit, c_uint, c_ushort
+from .bitstream import c_bit, c_uint, c_ushort, ReadStream, WriteStream
 
 log = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ class ReliabilityLayer:
 		self._send_loop()
 
 	def handle_datagram(self, datagram):
-		stream = BitStream(datagram)
+		stream = ReadStream(datagram)
 		if self.handle_datagram_header(stream):
 			return  # Acks only packet
 		# There can be multiple packets in one datagram
@@ -252,18 +252,18 @@ class ReliabilityLayer:
 				self._resends[message_number] = time.perf_counter()+self._rto, packet
 
 		if self._acks:
-			out = BitStream()
+			out = WriteStream()
 			out.write(c_bit(True))
 			out.write(c_uint(self._remote_system_time))
 			out.write(self._acks.serialize())
 			self._acks.clear()
-			self._transport.sendto(out, self._address)
+			self._transport.sendto(bytes(out), self._address)
 
 		if not self.stop:
 			asyncio.get_event_loop().call_later(0.03, self._send_loop)
 
 	def _send_packet(self, data, message_number, reliability, ordering_index, split_packet_id, split_packet_index, split_packet_count):
-		out = BitStream()
+		out = WriteStream()
 		out.write(c_bit(bool(self._acks)))
 		if self._acks:
 			out.write(c_uint(self._remote_system_time))
@@ -294,7 +294,7 @@ class ReliabilityLayer:
 		out.align_write()
 		out.write(data)
 
-		self._transport.sendto(out, self._address)
+		self._transport.sendto(bytes(out), self._address)
 
 	@staticmethod
 	def packet_header_length(reliability, is_split_packet):

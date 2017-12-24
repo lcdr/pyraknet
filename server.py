@@ -3,7 +3,7 @@ import logging
 import socket
 import time
 
-from .bitstream import BitStream, c_ubyte, c_uint, c_ushort
+from .bitstream import c_ubyte, c_uint, c_ushort, ReadStream, WriteStream
 from .reliability import PacketReliability, ReliabilityLayer
 from .messages import Message
 
@@ -18,6 +18,7 @@ class Server:
 
 		self.max_connections = max_connections
 		self.incoming_password = incoming_password
+		self._transport = None
 		self._start_time = int(time.perf_counter() * 1000)
 		self._connected = {}
 		self.handlers = {}
@@ -162,8 +163,9 @@ class Server:
 			log.info("No handlers for %s", packetname)
 
 		data = self.handler_data(data)
+		stream = ReadStream(data)
 		for handler in handlers:
-			stream = BitStream(data)
+			stream.read_offset = 0
 			if asyncio.iscoroutinefunction(handler):
 				asyncio.ensure_future(handler(stream, address))
 			else:
@@ -180,9 +182,9 @@ class Server:
 			raise NotImplementedError
 
 	def on_connection_request(self, data, address):
-		packet_password = data
+		packet_password = bytes(data)
 		if self.incoming_password == packet_password:
-			response = BitStream()
+			response = WriteStream()
 			response.write(c_ubyte(Message.ConnectionRequestAccepted))
 			response.write(socket.inet_aton(address[0]))
 			response.write(c_ushort(address[1]))
@@ -199,7 +201,7 @@ class Server:
 	def on_internal_ping(self, data, address):
 		ping_send_time = data[:4]
 
-		pong = BitStream()
+		pong = WriteStream()
 		pong.write(c_ubyte(Message.ConnectedPong))
 		pong.write(ping_send_time)
 		pong.write(c_uint(int(time.perf_counter() * 1000) - self._start_time))
