@@ -185,13 +185,9 @@ class WriteStream(_AbstractStream):
 	"""Allows simple sequential writing to bytes."""
 	_data: bytearray
 
-	def __init__(self, data: bytes=None):
-		if data is None:
-			data = bytearray()
-		elif not isinstance(data, bytearray):
-			data = bytearray(data)
-		self._data = data
-		self._write_offset = len(self._data) * 8
+	def __init__(self):
+		self._data = bytearray()
+		self._write_offset = 0
 
 	def write(self, arg, compressed: bool=False, allocated_length: int=None, length_type=None) -> None:
 		"""

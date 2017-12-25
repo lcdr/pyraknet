@@ -3,8 +3,8 @@ import unittest
 from pyraknet.bitstream import ReadStream, WriteStream
 
 class _BitStream(WriteStream, ReadStream):
-	def __init__(self, data=None):
-		super().__init__(data)
+	def __init__(self):
+		super().__init__()
 		self.read_offset = 0
 
 class BitStreamTest(unittest.TestCase):
