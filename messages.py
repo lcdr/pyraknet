@@ -84,3 +84,4 @@ class Message(IntEnum):
 	AutoRPCRemoteIndex = 0x50
 	AutoRPCUnknownRemoteIndex = 0x51
 	RPCRemoteError = 0x52
+	UserPacket = 0x53

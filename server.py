@@ -2,6 +2,7 @@ import asyncio
 import logging
 import socket
 import time
+from typing import ByteString, Callable, Tuple
 
 from .bitstream import c_ubyte, c_uint, c_ushort, ReadStream, WriteStream
 from .reliability import PacketReliability, ReliabilityLayer
@@ -9,8 +10,10 @@ from .messages import Message
 
 log = logging.getLogger(__name__)
 
+Address = Tuple[str, int]
+
 class Server:
-	def __init__(self, address, max_connections, incoming_password):
+	def __init__(self, address: Address, max_connections: int, incoming_password: bytes):
 		host, port = address
 		if host == "localhost":
 			host = "127.0.0.1"
@@ -21,24 +24,20 @@ class Server:
 		self._transport = None
 		self._start_time = int(time.perf_counter() * 1000)
 		self._connected = {}
-		self.handlers = {}
-		self.not_console_logged_packets = set(("InternalPing", "ConnectedPong"))
+		self._handlers = {}
+		self.not_console_logged_packets = {"InternalPing", "ConnectedPong"}
 		self.file_logged_packets = set()
 
 		asyncio.ensure_future(self.init_network())
 		asyncio.get_event_loop().call_later(10, self._check_connections)
 
-		self.register_handler(Message.ConnectionRequest, self.on_connection_request)
-		self.register_handler(Message.NewIncomingConnection, self.on_new_connection)
-		self.register_handler(Message.InternalPing, self.on_internal_ping)
-		self.register_handler(Message.DisconnectionNotification, self.on_disconnect_or_connection_lost)
-		self.register_handler(Message.ConnectionLost, self.on_disconnect_or_connection_lost)
 		log.info("Started up")
 
 	async def init_network(self):
 		loop = asyncio.get_event_loop()
 		await loop.create_datagram_endpoint(lambda: self, local_addr=self._address)
 		self._address = self._transport.get_extra_info("sockname")
+		self.handle("network_init", self._address)
 
 	# Protocol methods
 
@@ -64,11 +63,11 @@ class Server:
 	def datagram_received(self, data, address):
 		if len(data) <= 2:  # If the length is leq 2 then this is a raw datagram
 			if data[0] == Message.OpenConnectionRequest:
-				self.on_open_connection_request(address)
+				self._on_open_connection_request(address)
 		else:
 			if address in self._connected:
 				for packet in self._connected[address].handle_datagram(data):
-					self.on_packet(packet, address)
+					self._on_packet(packet, address)
 
 	def _check_connections(self):
 		# close connections that haven't sent acks in the last 10 seconds
@@ -83,11 +82,11 @@ class Server:
 	def close_connection(self, address):
 		if address in self._connected:
 			self.send(bytes((Message.DisconnectionNotification,)), address)
-			self.on_packet(bytes((Message.DisconnectionNotification,)), address)
+			self._on_disconnect_or_connection_lost(address)
 		else:
 			log.error("Tried closing connection to someone we are not connected to! (Todo: Implement the router)")
 
-	def send(self, data, address=None, broadcast=False, reliability=PacketReliability.ReliableOrdered):
+	def send(self, data: ByteString, address: Address=None, broadcast=False, reliability=PacketReliability.ReliableOrdered):
 		assert reliability != PacketReliability.ReliableSequenced  # If you need this one, tell me
 		if broadcast:
 			recipients = self._connected.copy()
@@ -101,43 +100,35 @@ class Server:
 		if address not in self._connected:
 			log.error("Tried sending %s to %s but we are not connected!" % (data, address))
 			return
-		self.log_packet(data, address, received=False)
+		if data[0] != Message.UserPacket:
+			self._log_packet(data, received=False)
 		self._connected[address].send(data, reliability)
 
-	# Overridable hooks
+	EVENT_NAMES = "disconnect_or_connection_lost", "network_init", "user_packet"
 
-	@staticmethod
-	def packetname(data):
-		"""String name of the packet for logging. If the name is not known, ValueError should be returned, in which case unknown_packetname will be called"""
-		return Message(data[0]).name
+	# General handler system
+	def add_handler(self, event_name: str, handler: Callable):
+		if event_name not in Server.EVENT_NAMES:
+			raise ValueError("Invalid event name %s", event_name)
+		self._handlers.setdefault(event_name, []).append(handler)
 
-	@staticmethod
-	def unknown_packetname(data):
-		"""Called when a packet name is unknown (see above). This should not throw an exception."""
-		return "%.2x" % data[0]
+	def handle(self, event_name: str, *args):
+		if event_name not in Server.EVENT_NAMES:
+			raise ValueError("Invalid event name %s", event_name)
+		if event_name not in self._handlers:
+			return
+		for handler in self._handlers[event_name]:
+			handler(*args)
 
-	@staticmethod
-	def packet_id(data):
-		return data[0]
+	# Packet handler stuff
 
-	@staticmethod
-	def handler_data(data):
-		"""For cutting off headers that the handler already knows and are therefore redundant."""
-		return data[1:]
-
-	# Handler stuff
-
-	def register_handler(self, packet_id, handler):
-		handlers = self.handlers.setdefault(packet_id, [])
-		handlers.insert(0, handler)
-
-	def log_packet(self, data, address, received):
+	def _log_packet(self, data, received):
 		try:
-			packetname = self.packetname(data)
+			packetname = Message(data[0]).name
 			file_log = packetname in self.file_logged_packets
 			console_log = packetname not in self.not_console_logged_packets
 		except ValueError:
-			packetname = self.unknown_packetname(data)
+			packetname = "Nonexisting packet %i" % data[0]
 			file_log = False
 			console_log = True
 
@@ -151,29 +142,25 @@ class Server:
 			else:
 				log.debug("snd %s", packetname)
 
-	def on_packet(self, data, address):
-		self.log_packet(data, address, received=True)
-
-		handlers = self.handlers.get(self.packet_id(data), ())
-		if not handlers:
-			try:
-				packetname = self.packetname(data)
-			except ValueError:
-				packetname = self.unknown_packetname(data)
-			log.info("No handlers for %s", packetname)
-
-		data = self.handler_data(data)
+	def _on_packet(self, data, address):
 		stream = ReadStream(data)
-		for handler in handlers:
-			stream.read_offset = 0
-			if asyncio.iscoroutinefunction(handler):
-				asyncio.ensure_future(handler(stream, address))
-			else:
-				handler(stream, address)
+		message_id = stream.read(c_ubyte)
+		if message_id != Message.UserPacket:
+			self._log_packet(data, received=True)
+		if message_id == Message.ConnectionRequest:
+			self._on_connection_request(stream, address)
+		elif message_id == Message.NewIncomingConnection:
+			self._on_new_connection(address)
+		elif message_id == Message.InternalPing:
+			self._on_internal_ping(stream, address)
+		elif message_id in (Message.DisconnectionNotification, Message.ConnectionLost):
+			self._on_disconnect_or_connection_lost(address)
+		elif message_id == Message.UserPacket:
+			self.handle("user_packet", stream, address)
 
 	# Packet callbacks
 
-	def on_open_connection_request(self, address):
+	def _on_open_connection_request(self, address):
 		if len(self._connected) < self.max_connections:
 			if address not in self._connected:
 				self._connected[address] = ReliabilityLayer(self._transport, address)
@@ -181,8 +168,8 @@ class Server:
 		else:
 			raise NotImplementedError
 
-	def on_connection_request(self, data, address):
-		packet_password = bytes(data)
+	def _on_connection_request(self, data, address):
+		packet_password = data.read(bytes, length=len(data)-1)
 		if self.incoming_password == packet_password:
 			response = WriteStream()
 			response.write(c_ubyte(Message.ConnectionRequestAccepted))
@@ -195,19 +182,20 @@ class Server:
 		else:
 			raise NotImplementedError
 
-	def on_new_connection(self, data, address):
+	def _on_new_connection(self, address):
 		log.info("New Connection from %s", address)
 
-	def on_internal_ping(self, data, address):
-		ping_send_time = data[:4]
+	def _on_internal_ping(self, data, address):
+		ping_send_time = data.read(c_uint)
 
 		pong = WriteStream()
 		pong.write(c_ubyte(Message.ConnectedPong))
-		pong.write(ping_send_time)
+		pong.write(c_uint(ping_send_time))
 		pong.write(c_uint(int(time.perf_counter() * 1000) - self._start_time))
 		self.send(pong, address, PacketReliability.Unreliable)
 
-	def on_disconnect_or_connection_lost(self, data, address):
+	def _on_disconnect_or_connection_lost(self, address):
 		log.info("Disconnect/Connection lost to %s", address)
 		self._connected[address].stop = True
 		del self._connected[address]
+		self.handle("disconnect_or_connection_lost", address)

@@ -12,6 +12,28 @@ from .server import Server
 
 log = logging.getLogger(__name__)
 
+class Replica(ABC):
+	"""Abstract base class for replicas (objects serialized using the replica manager system)."""
+
+	@abstractmethod
+	def write_construction(self) -> WriteStream:
+		"""
+		This is where the object should write data to be sent on construction.
+		Return the bitstream you wrote to.
+		"""
+
+	@abstractmethod
+	def serialize(self) -> WriteStream:
+		"""
+		This is where the object should write data to be sent on serialization.
+		Return the bitstream you wrote to.
+		"""
+
+	def on_destruction(self) -> None:
+		"""
+		This will be called by the ReplicaManager before the destruction message is sent.
+		"""
+
 class ReplicaManager:
 	"""
 	Handles broadcasting updates of objects to connected players.
@@ -19,7 +41,7 @@ class ReplicaManager:
 
 	def __init__(self, server: Server):
 		self._server = server
-		self._server.register_handler(Message.DisconnectionNotification, self._on_disconnect_or_connection_lost)
+		self._server.add_handler("disconnect_or_connection_lost", self._on_disconnect_or_connection_lost)
 		self._participants = set()
 		self._network_ids = {}
 		self._current_network_id = 0
@@ -35,7 +57,7 @@ class ReplicaManager:
 		for obj in self._network_ids:
 			self._construct(obj, new=False, recipients=(address,))
 
-	def construct(self, obj: "Replica", new=True):
+	def construct(self, obj: Replica, new=True):
 		"""
 		Send a construction message to participants.
 
@@ -62,7 +84,7 @@ class ReplicaManager:
 		for recipient in recipients:
 			self._server.send(out, recipient)
 
-	def serialize(self, obj: "Replica"):
+	def serialize(self, obj: Replica):
 		"""
 		Send a serialization message to participants.
 
@@ -77,7 +99,7 @@ class ReplicaManager:
 		for participant in self._participants:
 			self._server.send(out, participant)
 
-	def destruct(self, obj: "Replica"):
+	def destruct(self, obj: Replica):
 		"""
 		Send a destruction message to participants.
 
@@ -95,27 +117,5 @@ class ReplicaManager:
 
 		del self._network_ids[obj]
 
-	def _on_disconnect_or_connection_lost(self, data, address):
+	def _on_disconnect_or_connection_lost(self, address):
 		self._participants.discard(address)
-
-class Replica(ABC):
-	"""Abstract base class for replicas (objects serialized using the replica manager system)."""
-
-	@abstractmethod
-	def write_construction(self) -> WriteStream:
-		"""
-		This is where the object should write data to be sent on construction.
-		Return the bitstream you wrote to.
-		"""
-
-	@abstractmethod
-	def serialize(self) -> WriteStream:
-		"""
-		This is where the object should write data to be sent on serialization.
-		Return the bitstream you wrote to.
-		"""
-
-	def on_destruction(self) -> None:
-		"""
-		This will be called by the ReplicaManager before the destruction message is sent.
-		"""
