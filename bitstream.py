@@ -5,6 +5,7 @@ Also includes objects for converting datatypes from/to bytes, similar to the sta
 
 import math
 import struct
+from abc import ABC, abstractmethod
 from typing import Any, AnyStr, ByteString, cast, overload, SupportsBytes, Type, Union
 
 class _Struct(struct.Struct):
@@ -51,6 +52,19 @@ class c_bit:
 	def __init__(self, boolean: bool):
 		self.value = boolean
 
+class Serializable(ABC):
+	"""By inheriting from this class you can create types which you can pass to the read/write bitstream functions."""
+	@abstractmethod
+	def serialize(self, stream: "WriteStream") -> None:
+		"""Write this object to the bitstream."""
+		pass
+
+	@staticmethod
+	@abstractmethod
+	def deserialize(stream: "ReadStream") -> "Serializable":
+		"""Create a new object from the bitstream."""
+		pass
+
 class _AbstractStream(ByteString, SupportsBytes):
 	_data: ByteString
 
@@ -95,7 +109,19 @@ class ReadStream(_AbstractStream):
 		pass
 
 	@overload
+	def read(self, arg_type: Type[Serializable]) -> Serializable:
+		pass
+
+	@overload
 	def read(self, arg_type: Type[bytes], length: int) -> bytes:
+		pass
+
+	@overload
+	def read(self, arg_type: Type[bytes], allocated_length: int=None, length_type: int=None) -> bytes:
+		pass
+
+	@overload
+	def read(self, arg_type: Type[str], allocated_length: int=None, length_type: int=None) -> str:
 		pass
 
 	def read(self, arg_type, length=None, allocated_length=None, length_type=None):
@@ -109,6 +135,8 @@ class ReadStream(_AbstractStream):
 			return arg_type.unpack(read)[0]
 		if issubclass(arg_type, c_bit):
 			return self._read_bit()
+		if issubclass(arg_type, Serializable):
+			return arg_type.deserialize(self)
 		if allocated_length is not None or length_type is not None:
 			return self._read_str(arg_type, allocated_length, length_type)
 		if issubclass(arg_type, bytes):
@@ -229,6 +257,10 @@ class WriteStream(_AbstractStream):
 		pass
 
 	@overload
+	def write(self, arg: Serializable) -> None:
+		pass
+
+	@overload
 	def write(self, arg: AnyStr, allocated_length: int=None, length_type: int=None) -> None:
 		pass
 
@@ -247,14 +279,17 @@ class WriteStream(_AbstractStream):
 				if self._write_offset//8 == len(self._data)-2:
 					del self._data[-1]
 			return
+		if isinstance(arg, c_bit):
+			self._write_bit(arg.value)
+			return
+		if isinstance(arg, Serializable):
+			arg.serialize(self)
+			return
 		if allocated_length is not None or length_type is not None:
 			self._write_str(arg, allocated_length, length_type)
 			return
 		if isinstance(arg, (bytes, bytearray)):
 			self._write_bytes(arg)
-			return
-		if isinstance(arg, c_bit):
-			self._write_bit(arg.value)
 			return
 
 		raise TypeError(arg)
