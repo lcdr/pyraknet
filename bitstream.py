@@ -5,30 +5,38 @@ Also includes objects for converting datatypes from/to bytes, similar to the sta
 
 import math
 import struct
-from typing import AnyStr, ByteString, SupportsBytes
+from typing import Any, AnyStr, ByteString, cast, overload, SupportsBytes, Type, Union
 
 class _Struct(struct.Struct):
-	# cast-like syntax for packing
-	def __call__(self, value) -> bytes:
-		return self.pack(value)
-
 	def __str__(self) -> str:
 		return "<Struct %s>" % self.format
 
-c_bool = _Struct("<?")
-c_float = _Struct("<f")
-c_double = _Struct("<d")
-c_int = _Struct("<i")
-c_uint = _Struct("<I")
+class _BoolStruct(_Struct):
+	def __call__(self, value: bool) -> bytes:
+		return self.pack(value)
 
-c_byte = _Struct("<b")
-c_ubyte = _Struct("<B")
-c_short = _Struct("<h")
-c_ushort = _Struct("<H")
-c_long = _Struct("<l")
-c_ulong = _Struct("<L")
-c_longlong = _Struct("<q")
-c_ulonglong = _Struct("<Q")
+class _IntStruct(_Struct):
+	def __call__(self, value: int) -> bytes:
+		return self.pack(value)
+
+class _FloatStruct(_Struct):
+	def __call__(self, value: float) -> bytes:
+		return self.pack(value)
+
+c_bool = _BoolStruct("<?")
+c_float = _FloatStruct("<f")
+c_double = _FloatStruct("<d")
+c_int = _IntStruct("<i")
+c_uint = _IntStruct("<I")
+
+c_byte = _IntStruct("<b")
+c_ubyte = _IntStruct("<B")
+c_short = _IntStruct("<h")
+c_ushort = _IntStruct("<H")
+c_long = _IntStruct("<l")
+c_ulong = _IntStruct("<L")
+c_longlong = _IntStruct("<q")
+c_ulonglong = _IntStruct("<Q")
 
 c_int8 = c_byte
 c_uint8 = c_ubyte
@@ -40,22 +48,22 @@ c_int64 = c_longlong
 c_uint64 = c_ulonglong
 
 class c_bit:
-	def __init__(self, boolean):
+	def __init__(self, boolean: bool):
 		self.value = boolean
 
 class _AbstractStream(ByteString, SupportsBytes):
 	_data: ByteString
 
-	def __bytes__(self):
+	def __bytes__(self) -> bytes:
 		return bytes(self._data)
 
-	def __getitem__(self, item):
+	def __getitem__(self, item: Any) -> Any:
 		return self._data[item]
 
-	def __len__(self):
+	def __len__(self) -> int:
 		return len(self._data)
 
-	def __str__(self):
+	def __str__(self) -> str:
 		return str(self._data)
 
 class ReadStream(_AbstractStream):
@@ -70,19 +78,34 @@ class ReadStream(_AbstractStream):
 		"""Skips reading byte_length number of bytes."""
 		self.read_offset += byte_length * 8
 
-	def read(self, arg_type, compressed=False, length: int=None, allocated_length: int=None, length_type=None):
+	@overload
+	def read(self, arg_type: _BoolStruct) -> bool:
+		pass
+
+	@overload
+	def read(self, arg_type: _FloatStruct) -> float:
+		pass
+
+	@overload
+	def read(self, arg_type: _IntStruct) -> int:
+		pass
+
+	@overload
+	def read(self, arg_type: Type[c_bit]) -> bool:
+		pass
+
+	@overload
+	def read(self, arg_type: Type[bytes], length: int) -> bytes:
+		pass
+
+	def read(self, arg_type, length=None, allocated_length=None, length_type=None):
 		"""
 		Read a value of type arg_type from the bitstream.
 		allocated_length is for fixed-length strings.
 		length_type is for variable-length strings.
 		"""
-		if isinstance(arg_type, struct.Struct):
-			if compressed:
-				if arg_type in (c_float, c_double):
-					raise NotImplementedError
-				read = self._read_compressed(arg_type.size)
-			else:
-				read = self._read_bytes(arg_type.size)
+		if isinstance(arg_type, _Struct):
+			read = self._read_bytes(length=arg_type.size)
 			return arg_type.unpack(read)[0]
 		if issubclass(arg_type, c_bit):
 			return self._read_bit()
@@ -92,7 +115,7 @@ class ReadStream(_AbstractStream):
 			return self._read_bytes(length)
 		raise TypeError(arg_type)
 
-	def _read_str(self, arg_type, allocated_length: int, length_type) -> AnyStr:
+	def _read_str(self, arg_type: Type[AnyStr], allocated_length: int=None, length_type: _IntStruct=None) -> AnyStr:
 		if issubclass(arg_type, str):
 			char_size = 2
 		else:
@@ -101,8 +124,8 @@ class ReadStream(_AbstractStream):
 		if length_type is not None:
 			# Variable-length string
 			length = self.read(length_type)
-			value = self.read(bytes, length=length*char_size)
-		else:
+			value = self._read_bytes(length*char_size)
+		elif allocated_length is not None:
 			# Fixed-length string
 			value = self._read_bytes(allocated_length*char_size)
 			# find null terminator
@@ -113,9 +136,11 @@ class ReadStream(_AbstractStream):
 					break
 			else:
 				raise RuntimeError("String doesn't have null terminator")
+		else:
+				raise ValueError
 
 		if issubclass(arg_type, str):
-			value = value.decode("utf-16-le")
+			return value.decode("utf-16-le")
 		return value
 
 	def _read_bit(self) -> bool:
@@ -143,17 +168,21 @@ class ReadStream(_AbstractStream):
 		if len(self._data) - self.read_offset//8 < num_bytes_read:
 			raise EOFError("Trying to read %i bytes but only %i remain" % (num_bytes_read, len(self._data) - self.read_offset // 8))
 
-		output = bytearray(self._data[self.read_offset // 8:self.read_offset // 8 + num_bytes_read])
-		if self.read_offset % 8 != 0:
+		if self.read_offset % 8 == 0:
+			output = self._data[self.read_offset // 8:self.read_offset // 8 + num_bytes_read]
+		else:
 			# data is shifted
 			# clear the part before the struct
-			output[0] &= (1 << 8 - self.read_offset % 8) - 1
+
+			firstbyte = self._data[self.read_offset // 8] & ((1 << 8 - self.read_offset % 8) - 1)
+			output = firstbyte.to_bytes(1, "big") + self._data[self.read_offset // 8 + 1:self.read_offset // 8 + num_bytes_read]
 			# shift back
 			output = (int.from_bytes(output, "big") >> (8 - self.read_offset % 8)).to_bytes(length, "big")
 		self.read_offset += length * 8
 		return output
 
-	def _read_compressed(self, number_of_bytes: int) -> bytes:
+	def read_compressed(self, arg_type: _IntStruct) -> int:
+		number_of_bytes = arg_type.size
 		current_byte = number_of_bytes - 1
 
 		while current_byte > 0:
@@ -161,7 +190,8 @@ class ReadStream(_AbstractStream):
 				current_byte -= 1
 			else:
 				# Read the rest of the bytes
-				return bytearray(number_of_bytes - current_byte - 1) + self._read_bytes(current_byte + 1)
+				read = bytes(number_of_bytes - current_byte - 1) + self._read_bytes(current_byte + 1)
+				return cast(int, arg_type.unpack(read)[0])
 
 		# All but the first bytes are 0. If the upper half of the last byte is a 0 (positive) or 16 (negative) then what we read will be a 1 and the remaining 4 bits.
 		# Otherwise we read a 0 and the 8 bits
@@ -169,7 +199,8 @@ class ReadStream(_AbstractStream):
 			start = bytes([self.read_bits(4)])
 		else:
 			start = self._read_bytes(1)
-		return start + bytearray(number_of_bytes - current_byte - 1)
+		read = start + bytes(number_of_bytes - current_byte - 1)
+		return cast(int, arg_type.unpack(read)[0])
 
 	def align_read(self) -> None:
 		if self.read_offset % 8 != 0:
@@ -189,7 +220,19 @@ class WriteStream(_AbstractStream):
 		self._data = bytearray()
 		self._write_offset = 0
 
-	def write(self, arg, compressed: bool=False, allocated_length: int=None, length_type=None) -> None:
+	@overload
+	def write(self, arg: ByteString) -> None:
+		pass
+
+	@overload
+	def write(self, arg: c_bit) -> None:
+		pass
+
+	@overload
+	def write(self, arg: AnyStr, allocated_length: int=None, length_type: int=None) -> None:
+		pass
+
+	def write(self, arg, allocated_length=None, length_type=None):
 		"""
 		Write a value to the bitstream.
 		allocated_length is for fixed-length strings.
@@ -208,10 +251,7 @@ class WriteStream(_AbstractStream):
 			self._write_str(arg, allocated_length, length_type)
 			return
 		if isinstance(arg, (bytes, bytearray)):
-			if compressed:
-				self._write_compressed(arg)
-			else:
-				self._write_bytes(arg)
+			self._write_bytes(arg)
 			return
 		if isinstance(arg, c_bit):
 			self._write_bit(arg.value)
@@ -219,7 +259,7 @@ class WriteStream(_AbstractStream):
 
 		raise TypeError(arg)
 
-	def _write_str(self, str_: AnyStr, allocated_length: int, length_type) -> None:
+	def _write_str(self, str_: AnyStr, allocated_length: int=None, length_type: _IntStruct=None) -> None:
 		# possibly include default encoded length for non-variable-length strings (seems to be 33)
 		if isinstance(str_, str):
 			encoded_str = str_.encode("utf-16-le")
@@ -229,7 +269,7 @@ class WriteStream(_AbstractStream):
 		if length_type is not None:
 			# Variable-length string
 			self.write(length_type(len(str_))) # note: there's also a version that uses the length of the encoded string, should that be used?
-		else:
+		elif allocated_length is not None:
 			# Fixed-length string
 			# null terminator
 			if isinstance(str_, str):
@@ -276,7 +316,7 @@ class WriteStream(_AbstractStream):
 			self._data[self._write_offset//8+1:self._write_offset//8+1+len(byte_arg)] = new[1:]
 		self._write_offset += len(byte_arg)*8
 
-	def _write_compressed(self, byte_arg: bytes) -> None:
+	def write_compressed(self, byte_arg: bytes) -> None:
 		current_byte = len(byte_arg) - 1
 
 		# Write upper bytes with a single 1

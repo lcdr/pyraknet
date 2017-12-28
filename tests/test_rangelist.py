@@ -1,7 +1,7 @@
 import random
 import unittest
 
-from pyraknet.rangelist import RangeList, ReadStream
+from pyraknet._rangelist import RangeList, ReadStream
 
 class RangeListTest(unittest.TestCase):
 	def setUp(self):

@@ -7,15 +7,16 @@ import threading
 import traceback
 
 import pyraknet.server
+from pyraknet.messages import Address
 
 class Server(pyraknet.server.Server):
-	def __init__(self, *args, **kwargs):
-		super().__init__(*args, **kwargs)
+	def __init__(self, address: Address, max_connections: int, incoming_password: bytes):
+		super().__init__(address, max_connections, incoming_password)
 		print("Enter packet directory path to send packets in directory")
 		command_line = threading.Thread(target=self.input_loop, daemon=True) # I'd like to do this with asyncio but I can't figure out how
 		command_line.start()
 
-	def input_loop(self):
+	def input_loop(self) -> None:
 		while True:
 			try:
 				path = "./packets/"+input()

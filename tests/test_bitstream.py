@@ -1,6 +1,7 @@
+import random
 import unittest
 
-from pyraknet.bitstream import ReadStream, WriteStream
+from pyraknet.bitstream import c_uint, ReadStream, WriteStream
 
 class _BitStream(WriteStream, ReadStream):
 	def __init__(self):
@@ -10,12 +11,22 @@ class _BitStream(WriteStream, ReadStream):
 class BitStreamTest(unittest.TestCase):
 	def setUp(self):
 		self.stream = _BitStream()
+		shift = random.randrange(0, 8)
+		if shift > 0:
+			self.stream.write_bits(0xff, shift)
+			self.stream.read_bits(shift)
 
 class GeneralTest(BitStreamTest):
 	def test_len(self):
 		string = b"hello world"
+		old_len = len(self.stream)
 		self.stream.write(string)
-		self.assertEqual(len(self.stream), len(string))
+		self.assertEqual(len(self.stream)-old_len, len(string))
+
+	def test_compressed(self):
+		value = 42
+		self.stream.write_compressed(c_uint(value))
+		self.assertEqual(self.stream.read_compressed(c_uint), value)
 
 	def test_read_bytes_too_much(self):
 		with self.assertRaises(EOFError):
@@ -37,20 +48,12 @@ class StringTest:
 		else:
 			cls.CHAR_SIZE = 1
 
-	def test_write_allocated(self):
-		self.stream.write(self.STRING, allocated_length=len(self.STRING)+10)
-		if isinstance(self.STRING, str):
-			encoded = self.STRING.encode("utf-16-le")
-		else:
-			encoded = self.STRING
-		self.assertEqual(self.stream._data, encoded+bytes((len(self.STRING)+10)*self.CHAR_SIZE-len(encoded)))
-
 	def test_write_allocated_long(self):
 		with self.assertRaises(ValueError):
 			self.stream.write(self.STRING, allocated_length=len(self.STRING)-2)
 
-	def test_read_allocated(self):
-		self.test_write_allocated()
+	def test_allocated(self):
+		self.stream.write(self.STRING, allocated_length=len(self.STRING) + 10)
 		value = self.stream.read(type(self.STRING), allocated_length=len(self.STRING)+10)
 		self.assertEqual(value, self.STRING)
 

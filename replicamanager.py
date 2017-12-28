@@ -5,9 +5,10 @@ See RakNet's ReplicaManager.
 
 import logging
 from abc import ABC, abstractmethod
+from typing import Dict, Iterable, Set
 
 from .bitstream import c_bit, c_ubyte, c_ushort, WriteStream
-from .messages import Message
+from .messages import Address, Message
 from .server import Server
 
 log = logging.getLogger(__name__)
@@ -42,11 +43,11 @@ class ReplicaManager:
 	def __init__(self, server: Server):
 		self._server = server
 		self._server.add_handler("disconnect_or_connection_lost", self._on_disconnect_or_connection_lost)
-		self._participants = set()
-		self._network_ids = {}
+		self._participants: Set[Address] = set()
+		self._network_ids: Dict[Replica, int] = {}
 		self._current_network_id = 0
 
-	def add_participant(self, address):
+	def add_participant(self, address: Address) -> None:
 		"""
 		Add a participant to which object updates will be broadcast to.
 		Updates won't automatically be sent to all connected players, just the ones added via this method.
@@ -57,7 +58,7 @@ class ReplicaManager:
 		for obj in self._network_ids:
 			self._construct(obj, new=False, recipients=(address,))
 
-	def construct(self, obj: Replica, new=True):
+	def construct(self, obj: Replica, new: bool=True) -> None:
 		"""
 		Send a construction message to participants.
 
@@ -66,7 +67,7 @@ class ReplicaManager:
 		"""
 		self._construct(obj, new)
 
-	def _construct(self, obj: "Replica", new=True, recipients=None):
+	def _construct(self, obj: Replica, new: bool=True, recipients: Iterable[Address]=None) -> None:
 		# recipients is needed to send replicas to new participants
 		if recipients is None:
 			recipients = self._participants
@@ -84,7 +85,7 @@ class ReplicaManager:
 		for recipient in recipients:
 			self._server.send(out, recipient)
 
-	def serialize(self, obj: Replica):
+	def serialize(self, obj: Replica) -> None:
 		"""
 		Send a serialization message to participants.
 
@@ -99,7 +100,7 @@ class ReplicaManager:
 		for participant in self._participants:
 			self._server.send(out, participant)
 
-	def destruct(self, obj: Replica):
+	def destruct(self, obj: Replica) -> None:
 		"""
 		Send a destruction message to participants.
 
@@ -117,5 +118,5 @@ class ReplicaManager:
 
 		del self._network_ids[obj]
 
-	def _on_disconnect_or_connection_lost(self, address):
+	def _on_disconnect_or_connection_lost(self, address: Address) -> None:
 		self._participants.discard(address)

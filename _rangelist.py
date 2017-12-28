@@ -24,7 +24,7 @@ class RangeList(Collection[int]):
 		"""Init the rangelist, optionally by deserializing from a bitstream."""
 		self._ranges: List[_Range] = []
 		if input_stream is not None:
-			count = input_stream.read(c_ushort, compressed=True)
+			count = input_stream.read_compressed(c_ushort)
 			for _ in range(count):
 				max_equal_to_min = input_stream.read(c_bit)
 				min = input_stream.read(c_uint)
@@ -34,21 +34,21 @@ class RangeList(Collection[int]):
 					max = input_stream.read(c_uint)
 				self._ranges.append(_Range(min, max))
 
-	def __bool__(self):
+	def __bool__(self) -> bool:
 		return bool(self._ranges)
 
-	def __len__(self):
+	def __len__(self) -> int:
 		len = 0
 		for range_ in self._ranges:
 			len += range_.max - range_.min + 1
 		return len
 
-	def __iter__(self):
+	def __iter__(self) -> Iterator[int]:
 		"""Yield the numbers in the ranges, basically uncompressing the ranges."""
 		for range_ in self._ranges:
 			yield from range(range_.min, range_.max + 1)
 
-	def __contains__(self, item):
+	def __contains__(self, item: object) -> bool:
 		if not isinstance(item, int):
 			return False
 		for range in self._ranges:
@@ -112,7 +112,7 @@ class RangeList(Collection[int]):
 		(This currently serializes items as uints, since currently the only occurrence where I need to serialize a rangelist is with an uint)
 		"""
 		out = WriteStream()
-		out.write(c_ushort(len(self._ranges)), compressed=True)
+		out.write_compressed(c_ushort(len(self._ranges)))
 		for range in self._ranges:
 			out.write(c_bit(range.min == range.max))
 			out.write(c_uint(range.min))

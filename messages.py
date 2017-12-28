@@ -1,4 +1,7 @@
 from enum import IntEnum
+from typing import Tuple
+
+Address = Tuple[str, int]
 
 class Message(IntEnum):
 	InternalPing = 0x00
