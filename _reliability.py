@@ -82,7 +82,7 @@ class ReliabilityLayer:
 				self._srtt = (1 - alpha) * self._srtt + alpha * rtt
 			self._rto = max(1, self._srtt + 4*self._rtt_var)  # originally specified be at least clock resolution but since the client loop is set at 10 milliseconds there's no way it can be smaller anyways
 
-			acks = _rangelist.RangeList(data)
+			acks = data.read(_rangelist.RangeList)
 			for message_number in acks:
 				if message_number in self._resends:
 					del self._resends[message_number]
@@ -264,7 +264,7 @@ class ReliabilityLayer:
 			out = WriteStream()
 			out.write(c_bit(True))
 			out.write(c_uint(self._remote_system_time))
-			out.write(self._acks.serialize())
+			out.write(self._acks)
 			self._acks.clear()
 			self._transport.sendto(bytes(out), self._address)
 
@@ -276,7 +276,7 @@ class ReliabilityLayer:
 		out.write(c_bit(bool(self._acks)))
 		if self._acks:
 			out.write(c_uint(self._remote_system_time))
-			out.write(self._acks.serialize())
+			out.write(self._acks)
 			self._acks.clear()
 
 		assert ReliabilityLayer._packet_header_length(reliability, split_packet_id is not None) + len(data) <= MTU_SIZE - UDP_HEADER_SIZE

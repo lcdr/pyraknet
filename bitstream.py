@@ -165,7 +165,7 @@ class ReadStream(_AbstractStream):
 			else:
 				raise RuntimeError("String doesn't have null terminator")
 		else:
-				raise ValueError
+			raise ValueError
 
 		if issubclass(arg_type, str):
 			return value.decode("utf-16-le")

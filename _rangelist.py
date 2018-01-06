@@ -1,6 +1,6 @@
 from typing import Collection, Iterator, List
 
-from .bitstream import c_bit, c_uint, c_ushort, ReadStream, WriteStream
+from .bitstream import c_bit, c_uint, c_ushort, ReadStream, Serializable, WriteStream
 
 class _Range:
 	__slots__ = "min", "max"
@@ -9,7 +9,7 @@ class _Range:
 		self.min = min
 		self.max = max
 
-class RangeList(Collection[int]):
+class RangeList(Collection[int], Serializable):
 	"""
 	List that stores integers and compresses them to ranges if possible.
 	To add an item, use insert.
@@ -21,18 +21,7 @@ class RangeList(Collection[int]):
 	"""
 
 	def __init__(self, input_stream: ReadStream=None):
-		"""Init the rangelist, optionally by deserializing from a bitstream."""
 		self._ranges: List[_Range] = []
-		if input_stream is not None:
-			count = input_stream.read_compressed(c_ushort)
-			for _ in range(count):
-				max_equal_to_min = input_stream.read(c_bit)
-				min = input_stream.read(c_uint)
-				if max_equal_to_min:
-					max = min
-				else:
-					max = input_stream.read(c_uint)
-				self._ranges.append(_Range(min, max))
 
 	def __bool__(self) -> bool:
 		return bool(self._ranges)
@@ -106,16 +95,28 @@ class RangeList(Collection[int]):
 		# We ran through the whole list and couldn't find a good existing range
 		self._ranges.append(_Range(item, item))
 
-	def serialize(self) -> WriteStream:
+	def serialize(self, stream: WriteStream) -> None:
 		"""
 		Serialize the RangeList. This is meant to be compatible with RakNet's serialization.
 		(This currently serializes items as uints, since currently the only occurrence where I need to serialize a rangelist is with an uint)
 		"""
-		out = WriteStream()
-		out.write_compressed(c_ushort(len(self._ranges)))
+		stream.write_compressed(c_ushort(len(self._ranges)))
 		for range in self._ranges:
-			out.write(c_bit(range.min == range.max))
-			out.write(c_uint(range.min))
+			stream.write(c_bit(range.min == range.max))
+			stream.write(c_uint(range.min))
 			if range.min != range.max:
-				out.write(c_uint(range.max))
-		return out
+				stream.write(c_uint(range.max))
+
+	@staticmethod
+	def deserialize(stream: ReadStream) -> "RangeList":
+		rangelist = RangeList()
+		count = stream.read_compressed(c_ushort)
+		for _ in range(count):
+			max_equal_to_min = stream.read(c_bit)
+			min = stream.read(c_uint)
+			if max_equal_to_min:
+				max = min
+			else:
+				max = stream.read(c_uint)
+			rangelist._ranges.append(_Range(min, max))
+		return rangelist

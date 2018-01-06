@@ -89,7 +89,7 @@ class ReplicaManager:
 		"""
 		Send a serialization message to participants.
 
-		The actual content of the construction message is determined by the object's serialize method.
+		The actual content of the serialization message is determined by the object's serialize method.
 		Note that the manager does not automatically send a serialization message when some part of your object changes - you have to call this function explicitly.
 		"""
 		out = WriteStream()
