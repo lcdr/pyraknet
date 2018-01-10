@@ -1,7 +1,13 @@
 import random
 import unittest
 
-from pyraknet._rangelist import RangeList, ReadStream
+from pyraknet._rangelist import RangeList, ReadStream, WriteStream
+
+class _BitStream(WriteStream, ReadStream):
+	def __init__(self):
+		super().__init__()
+		self._unlocked = False
+		self._read_offset = 0
 
 class RangeListTest(unittest.TestCase):
 	def setUp(self):
@@ -18,8 +24,9 @@ class RangeListTest(unittest.TestCase):
 		for item in self.list.holes():
 			self.assertFalse(item in self.list)
 		# check that the serialization / deserialization match
-		stream = ReadStream(bytes(self.list.serialize()))
-		new_list = RangeList(stream)
+		stream = _BitStream()
+		stream.write(self.list)
+		new_list = stream.read(RangeList)
 		self.assertEqual(list(self.list), list(new_list))
 		# also check that the list is empty after clear
 		self.list.clear()
@@ -121,8 +128,9 @@ class RangeListTest(unittest.TestCase):
 		values = [1, 2, 4, 5]
 		for value in values:
 			self.list.insert(value)
-		stream = ReadStream(bytes(self.list.serialize()))
-		new_list = RangeList(stream)
+		stream = _BitStream()
+		stream.write(self.list)
+		new_list = stream.read(RangeList)
 		new_list.insert(3)
 		self.assertEqual(list(new_list), [1, 2, 3, 4, 5])
 

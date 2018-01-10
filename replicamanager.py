@@ -17,17 +17,15 @@ class Replica(ABC):
 	"""Abstract base class for replicas (objects serialized using the replica manager system)."""
 
 	@abstractmethod
-	def write_construction(self) -> WriteStream:
+	def write_construction(self, stream: WriteStream) -> None:
 		"""
 		This is where the object should write data to be sent on construction.
-		Return the bitstream you wrote to.
 		"""
 
 	@abstractmethod
-	def serialize(self) -> WriteStream:
+	def serialize(self, stream: WriteStream) -> None:
 		"""
 		This is where the object should write data to be sent on serialization.
-		Return the bitstream you wrote to.
 		"""
 
 	def on_destruction(self) -> None:
@@ -80,7 +78,7 @@ class ReplicaManager:
 		out.write(c_ubyte(Message.ReplicaManagerConstruction))
 		out.write(c_bit(True))
 		out.write(c_ushort(self._network_ids[obj]))
-		out.write(obj.write_construction())
+		obj.write_construction(out)
 
 		for recipient in recipients:
 			self._server.send(out, recipient)
@@ -95,7 +93,7 @@ class ReplicaManager:
 		out = WriteStream()
 		out.write(c_ubyte(Message.ReplicaManagerSerialize))
 		out.write(c_ushort(self._network_ids[obj]))
-		out.write(obj.serialize())
+		obj.serialize(out)
 
 		for participant in self._participants:
 			self._server.send(out, participant)

@@ -2,7 +2,7 @@ import asyncio
 import logging
 import socket
 import time
-from typing import Any, ByteString, Callable, cast, Dict, MutableSequence, Set
+from typing import Any, Callable, cast, Dict, MutableSequence, Set, SupportsBytes, Union
 
 from .bitstream import c_ubyte, c_uint, c_ushort, ReadStream, WriteStream
 from ._reliability import PacketReliability, ReliabilityLayer
@@ -80,8 +80,9 @@ class Server(asyncio.DatagramProtocol):
 		else:
 			log.error("Tried closing connection to someone we are not connected to! (Todo: Implement the router)")
 
-	def send(self, data: ByteString, address: Address=None, broadcast: bool=False, reliability: int=PacketReliability.ReliableOrdered) -> None:
+	def send(self, data: Union[bytes, SupportsBytes], address: Address=None, broadcast: bool=False, reliability: int=PacketReliability.ReliableOrdered) -> None:
 		assert reliability != PacketReliability.ReliableSequenced  # If you need this one, tell me
+		data = bytes(data)
 		if broadcast:
 			recipients = self._connected.copy()
 			if address is not None:
@@ -116,7 +117,7 @@ class Server(asyncio.DatagramProtocol):
 
 	# Packet handler stuff
 
-	def _log_packet(self, data: ByteString, received: bool) -> None:
+	def _log_packet(self, data: bytes, received: bool) -> None:
 		try:
 			packetname = Message(data[0]).name
 			file_log = packetname in self.file_logged_packets
@@ -150,7 +151,7 @@ class Server(asyncio.DatagramProtocol):
 		elif message_id in (Message.DisconnectionNotification, Message.ConnectionLost):
 			self._on_disconnect_or_connection_lost(address)
 		elif message_id == Message.UserPacket:
-			self._handle("user_packet", stream, address)
+			self._handle("user_packet", data, address)
 
 	# Packet callbacks
 
@@ -163,7 +164,7 @@ class Server(asyncio.DatagramProtocol):
 			raise NotImplementedError
 
 	def _on_connection_request(self, data: ReadStream, address: Address) -> None:
-		packet_password = data.read(bytes, length=len(data)-1)
+		packet_password = data.read_remaining()
 		if self._incoming_password == packet_password:
 			response = WriteStream()
 			response.write(c_ubyte(Message.ConnectionRequestAccepted))

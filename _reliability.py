@@ -10,7 +10,7 @@ import logging
 import math
 import time
 from collections import OrderedDict
-from typing import ByteString, Dict, Iterator, MutableSequence, Optional, Tuple
+from typing import Dict, Iterator, MutableSequence, Optional, Tuple
 
 from . import _rangelist
 from .bitstream import c_bit, c_uint, c_ushort, ReadStream, WriteStream
@@ -29,7 +29,7 @@ class PacketReliability:
 	ReliableOrdered = 3
 	ReliableSequenced = 4
 
-_Packet = Tuple[ByteString, int, Optional[int], Optional[int], Optional[int], Optional[int]]
+_Packet = Tuple[bytes, int, Optional[int], Optional[int], Optional[int], Optional[int]]
 
 class ReliabilityLayer:
 	def __init__(self, transport: asyncio.DatagramTransport, address: Address):
@@ -203,7 +203,7 @@ class ReliabilityLayer:
 	def are_there_resends(self) -> bool:
 		return bool(self._resends)
 
-	def send(self, data: ByteString, reliability: int) -> None:
+	def send(self, data: bytes, reliability: int) -> None:
 		ordering_index: Optional[int]
 		if reliability == PacketReliability.UnreliableSequenced:
 			ordering_index = self._sequenced_write_index
@@ -271,7 +271,7 @@ class ReliabilityLayer:
 		if not self.stop:
 			asyncio.get_event_loop().call_later(0.03, self._send_loop)
 
-	def _send_packet(self, data: ByteString, message_number: int, reliability: int, ordering_index: Optional[int], split_packet_id: Optional[int], split_packet_index: Optional[int], split_packet_count: Optional[int]) -> None:
+	def _send_packet(self, data: bytes, message_number: int, reliability: int, ordering_index: Optional[int], split_packet_id: Optional[int], split_packet_index: Optional[int], split_packet_count: Optional[int]) -> None:
 		out = WriteStream()
 		out.write(c_bit(bool(self._acks)))
 		if self._acks:

@@ -65,32 +65,31 @@ class Serializable(ABC):
 		"""Create a new object from the bitstream."""
 		pass
 
-class _AbstractStream(ByteString, SupportsBytes):
-	_data: ByteString
-
-	def __bytes__(self) -> bytes:
-		return bytes(self._data)
-
-	def __getitem__(self, item: Any) -> Any:
-		return self._data[item]
-
-	def __len__(self) -> int:
-		return len(self._data)
-
-	def __str__(self) -> str:
-		return str(self._data)
-
-class ReadStream(_AbstractStream):
+class ReadStream:
 	"""Allows simple sequential reading from bytes."""
 	_data: bytes
 
-	def __init__(self, data: bytes):
+	def __init__(self, data: bytes, unlocked=False):
 		self._data = data
-		self.read_offset = 0
+		self._unlocked = unlocked
+		self._read_offset = 0
+
+	@property
+	def read_offset(self) -> int:
+		if not self._unlocked:
+			raise RuntimeError
+		return self._read_offset
+
+	@read_offset.setter
+	def read_offset(self, value: int) -> None:
+		if not self._unlocked:
+			raise RuntimeError
+		self._read_offset = value
+
 
 	def skip_read(self, byte_length: int) -> None:
 		"""Skips reading byte_length number of bytes."""
-		self.read_offset += byte_length * 8
+		self._read_offset += byte_length * 8
 
 	@overload
 	def read(self, arg_type: _BoolStruct) -> bool:
@@ -117,7 +116,7 @@ class ReadStream(_AbstractStream):
 		pass
 
 	@overload
-	def read(self, arg_type: Type[bytes], allocated_length: int=None, length_type: int=None) -> bytes:
+	def read(self, arg_type: Type[bytes], allocated_length: int=None, length_type: _IntStruct=None) -> bytes:
 		pass
 
 	@overload
@@ -172,41 +171,41 @@ class ReadStream(_AbstractStream):
 		return value
 
 	def _read_bit(self) -> bool:
-		bit = self._data[self.read_offset // 8] & 0x80 >> self.read_offset % 8 != 0
-		self.read_offset += 1
+		bit = self._data[self._read_offset // 8] & 0x80 >> self._read_offset % 8 != 0
+		self._read_offset += 1
 		return bit
 
 	def read_bits(self, number_of_bits: int) -> int:
 		assert 0 < number_of_bits < 8
 
-		output = (self._data[self.read_offset // 8] << self.read_offset % 8) & 0xff # First half
-		if self.read_offset % 8 != 0 and number_of_bits > 8 - self.read_offset % 8: # If we have a second half, we didn't read enough bytes in the first half
-			output |= self._data[self.read_offset // 8 + 1] >> 8 - self.read_offset % 8 # Second half (overlaps byte boundary)
+		output = (self._data[self._read_offset // 8] << self._read_offset % 8) & 0xff # First half
+		if self._read_offset % 8 != 0 and number_of_bits > 8 - self._read_offset % 8: # If we have a second half, we didn't read enough bytes in the first half
+			output |= self._data[self._read_offset // 8 + 1] >> 8 - self._read_offset % 8 # Second half (overlaps byte boundary)
 		output >>= 8 - number_of_bits
-		self.read_offset += number_of_bits
+		self._read_offset += number_of_bits
 		return output
 
 	def _read_bytes(self, length: int) -> bytes:
-		if self.read_offset % 8 == 0:
+		if self._read_offset % 8 == 0:
 			num_bytes_read = length
 		else:
 			num_bytes_read = length+1
 
 		# check whether there is enough left to read
-		if len(self._data) - self.read_offset//8 < num_bytes_read:
-			raise EOFError("Trying to read %i bytes but only %i remain" % (num_bytes_read, len(self._data) - self.read_offset // 8))
+		if len(self._data) - self._read_offset//8 < num_bytes_read:
+			raise EOFError("Trying to read %i bytes but only %i remain" % (num_bytes_read, len(self._data) - self._read_offset // 8))
 
-		if self.read_offset % 8 == 0:
-			output = self._data[self.read_offset // 8:self.read_offset // 8 + num_bytes_read]
+		if self._read_offset % 8 == 0:
+			output = self._data[self._read_offset // 8:self._read_offset // 8 + num_bytes_read]
 		else:
 			# data is shifted
 			# clear the part before the struct
 
-			firstbyte = self._data[self.read_offset // 8] & ((1 << 8 - self.read_offset % 8) - 1)
-			output = firstbyte.to_bytes(1, "big") + self._data[self.read_offset // 8 + 1:self.read_offset // 8 + num_bytes_read]
+			firstbyte = self._data[self._read_offset // 8] & ((1 << 8 - self._read_offset % 8) - 1)
+			output = firstbyte.to_bytes(1, "big") + self._data[self._read_offset // 8 + 1:self._read_offset // 8 + num_bytes_read]
 			# shift back
-			output = (int.from_bytes(output, "big") >> (8 - self.read_offset % 8)).to_bytes(length, "big")
-		self.read_offset += length * 8
+			output = (int.from_bytes(output, "big") >> (8 - self._read_offset % 8)).to_bytes(length, "big")
+		self._read_offset += length * 8
 		return output
 
 	def read_compressed(self, arg_type: _IntStruct) -> int:
@@ -230,23 +229,33 @@ class ReadStream(_AbstractStream):
 		read = start + bytes(number_of_bytes - current_byte - 1)
 		return cast(int, arg_type.unpack(read)[0])
 
+	def read_remaining(self) -> bytes:
+		return self._read_bytes(len(self._data) - int(math.ceil(self._read_offset / 8)))
+
 	def align_read(self) -> None:
-		if self.read_offset % 8 != 0:
-			self.read_offset += 8 - self.read_offset % 8
+		if self._read_offset % 8 != 0:
+			self._read_offset += 8 - self._read_offset % 8
 
 	def all_read(self) -> bool:
 		# This is not accurate to the bit, just to the byte
-		return math.ceil(self.read_offset / 8) == len(self._data)
+		return math.ceil(self._read_offset / 8) == len(self._data)
 
 # Note: a ton of the logic here assumes that the write offset is never moved back, that is, that you never overwrite things
 # Doing so may break everything
-class WriteStream(_AbstractStream):
+class WriteStream(SupportsBytes):
 	"""Allows simple sequential writing to bytes."""
 	_data: bytearray
 
 	def __init__(self):
 		self._data = bytearray()
 		self._write_offset = 0
+		self._was_cast_to_bytes = False
+
+	def __bytes__(self) -> bytes:
+		if self._was_cast_to_bytes:
+			raise RuntimeError("WriteStream can only be cast to bytes once")
+		self._was_cast_to_bytes = True
+		return bytes(self._data)
 
 	@overload
 	def write(self, arg: ByteString) -> None:
@@ -261,7 +270,7 @@ class WriteStream(_AbstractStream):
 		pass
 
 	@overload
-	def write(self, arg: AnyStr, allocated_length: int=None, length_type: int=None) -> None:
+	def write(self, arg: AnyStr, allocated_length: int=None, length_type: _IntStruct=None) -> None:
 		pass
 
 	def write(self, arg, allocated_length=None, length_type=None):

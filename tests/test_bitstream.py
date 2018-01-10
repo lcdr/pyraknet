@@ -6,7 +6,8 @@ from pyraknet.bitstream import c_uint, ReadStream, WriteStream
 class _BitStream(WriteStream, ReadStream):
 	def __init__(self):
 		super().__init__()
-		self.read_offset = 0
+		self._unlocked = False
+		self._read_offset = 0
 
 class BitStreamTest(unittest.TestCase):
 	def setUp(self):
@@ -17,12 +18,6 @@ class BitStreamTest(unittest.TestCase):
 			self.stream.read_bits(shift)
 
 class GeneralTest(BitStreamTest):
-	def test_len(self):
-		string = b"hello world"
-		old_len = len(self.stream)
-		self.stream.write(string)
-		self.assertEqual(len(self.stream)-old_len, len(string))
-
 	def test_compressed(self):
 		value = 42
 		self.stream.write_compressed(c_uint(value))
