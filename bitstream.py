@@ -6,38 +6,91 @@ Also includes objects for converting datatypes from/to bytes, similar to the sta
 import math
 import struct
 from abc import ABC, abstractmethod
-from typing import Any, AnyStr, ByteString, cast, overload, SupportsBytes, Type, Union
+from typing import AnyStr, ByteString, cast, ClassVar, Generic, overload, SupportsBytes, Type, TypeVar
 
-class _Struct(struct.Struct):
+T = TypeVar('T')
+
+class _Struct(Generic[T]):
+	_struct: struct.Struct
+
+	def __new__(cls, value: T) -> bytes:
+		return cls._struct.pack(value)
+
 	def __str__(self) -> str:
-		return "<Struct %s>" % self.format
+		return "<Struct %s>" % _Struct._struct.format
 
-class _BoolStruct(_Struct):
-	def __call__(self, value: bool) -> bytes:
-		return self.pack(value)
+	@classmethod
+	def deserialize(cls, stream: "ReadStream") -> T:
+		return cast(T, cls._struct.unpack(stream.read(bytes, length=cls._struct.size))[0])
 
-class _IntStruct(_Struct):
-	def __call__(self, value: int) -> bytes:
-		return self.pack(value)
+class IntStruct(_Struct[int]):
+	@classmethod
+	def deserialize_compressed(cls, stream: "ReadStream") -> int:
+		number_of_bytes = cls._struct.size
+		current_byte = number_of_bytes - 1
 
-class _FloatStruct(_Struct):
-	def __call__(self, value: float) -> bytes:
-		return self.pack(value)
+		while current_byte > 0:
+			if stream.read(c_bit):
+				current_byte -= 1
+			else:
+				# Read the rest of the bytes
+				read = bytes(number_of_bytes - current_byte - 1) + stream.read(bytes, length=current_byte + 1)
+				return cast(int, cls._struct.unpack(read)[0])
 
-c_bool = _BoolStruct("<?")
-c_float = _FloatStruct("<f")
-c_double = _FloatStruct("<d")
-c_int = _IntStruct("<i")
-c_uint = _IntStruct("<I")
+		# All but the first bytes are 0. If the upper half of the last byte is a 0 (positive) or 16 (negative) then what we read will be a 1 and the remaining 4 bits.
+		# Otherwise we read a 0 and the 8 bits
+		if stream.read(c_bit):
+			start = bytes([stream.read_bits(4)])
+		else:
+			start = stream.read(bytes, length=1)
+		read = start + bytes(number_of_bytes - current_byte - 1)
+		return cast(int, cls._struct.unpack(read)[0])
 
-c_byte = _IntStruct("<b")
-c_ubyte = _IntStruct("<B")
-c_short = _IntStruct("<h")
-c_ushort = _IntStruct("<H")
-c_long = _IntStruct("<l")
-c_ulong = _IntStruct("<L")
-c_longlong = _IntStruct("<q")
-c_ulonglong = _IntStruct("<Q")
+class UnsignedIntStruct(IntStruct):
+	pass
+
+class SignedIntStruct(IntStruct):
+	pass
+
+class c_bool(_Struct[bool]):
+	_struct = struct.Struct("<?")
+
+class c_float(_Struct[float]):
+	_struct = struct.Struct("<f")
+
+class c_double(_Struct[float]):
+	_struct = struct.Struct("<d")
+
+class c_int(SignedIntStruct):
+	_struct = struct.Struct("<i")
+
+class c_uint(UnsignedIntStruct):
+	_struct = struct.Struct("<I")
+
+
+class c_byte(SignedIntStruct):
+	_struct = struct.Struct("<b")
+
+class c_ubyte(UnsignedIntStruct):
+	_struct = struct.Struct("<B")
+
+class c_short(SignedIntStruct):
+	_struct = struct.Struct("<h")
+
+class c_ushort(UnsignedIntStruct):
+	_struct = struct.Struct("<H")
+
+class c_long(SignedIntStruct):
+	_struct = struct.Struct("<l")
+
+class c_ulong(UnsignedIntStruct):
+	_struct = struct.Struct("<L")
+
+class c_longlong(SignedIntStruct):
+	_struct = struct.Struct("<q")
+
+class c_ulonglong(UnsignedIntStruct):
+	_struct = struct.Struct("<Q")
 
 c_int8 = c_byte
 c_uint8 = c_ubyte
@@ -65,11 +118,13 @@ class Serializable(ABC):
 		"""Create a new object from the bitstream."""
 		pass
 
+S = TypeVar('S', bound=Serializable)
+
 class ReadStream:
 	"""Allows simple sequential reading from bytes."""
 	_data: bytes
 
-	def __init__(self, data: bytes, unlocked=False):
+	def __init__(self, data: bytes, unlocked: bool=False):
 		self._data = data
 		self._unlocked = unlocked
 		self._read_offset = 0
@@ -86,21 +141,12 @@ class ReadStream:
 			raise RuntimeError
 		self._read_offset = value
 
-
 	def skip_read(self, byte_length: int) -> None:
 		"""Skips reading byte_length number of bytes."""
 		self._read_offset += byte_length * 8
 
 	@overload
-	def read(self, arg_type: _BoolStruct) -> bool:
-		pass
-
-	@overload
-	def read(self, arg_type: _FloatStruct) -> float:
-		pass
-
-	@overload
-	def read(self, arg_type: _IntStruct) -> int:
+	def read(self, arg_type: Type[_Struct[T]]) -> T:
 		pass
 
 	@overload
@@ -108,7 +154,7 @@ class ReadStream:
 		pass
 
 	@overload
-	def read(self, arg_type: Type[Serializable]) -> Serializable:
+	def read(self, arg_type: Type[S]) -> S:
 		pass
 
 	@overload
@@ -116,11 +162,11 @@ class ReadStream:
 		pass
 
 	@overload
-	def read(self, arg_type: Type[bytes], allocated_length: int=None, length_type: _IntStruct=None) -> bytes:
+	def read(self, arg_type: Type[bytes], allocated_length: int=None, length_type: Type[UnsignedIntStruct]=None) -> bytes:
 		pass
 
 	@overload
-	def read(self, arg_type: Type[str], allocated_length: int=None, length_type: int=None) -> str:
+	def read(self, arg_type: Type[str], allocated_length: int=None, length_type: Type[UnsignedIntStruct]=None) -> str:
 		pass
 
 	def read(self, arg_type, length=None, allocated_length=None, length_type=None):
@@ -129,9 +175,8 @@ class ReadStream:
 		allocated_length is for fixed-length strings.
 		length_type is for variable-length strings.
 		"""
-		if isinstance(arg_type, _Struct):
-			read = self._read_bytes(length=arg_type.size)
-			return arg_type.unpack(read)[0]
+		if issubclass(arg_type, _Struct):
+			return arg_type.deserialize(self)
 		if issubclass(arg_type, c_bit):
 			return self._read_bit()
 		if issubclass(arg_type, Serializable):
@@ -142,7 +187,7 @@ class ReadStream:
 			return self._read_bytes(length)
 		raise TypeError(arg_type)
 
-	def _read_str(self, arg_type: Type[AnyStr], allocated_length: int=None, length_type: _IntStruct=None) -> AnyStr:
+	def _read_str(self, arg_type: Type[AnyStr], allocated_length: int=None, length_type: Type[UnsignedIntStruct]=None) -> AnyStr:
 		if issubclass(arg_type, str):
 			char_size = 2
 		else:
@@ -208,26 +253,8 @@ class ReadStream:
 		self._read_offset += length * 8
 		return output
 
-	def read_compressed(self, arg_type: _IntStruct) -> int:
-		number_of_bytes = arg_type.size
-		current_byte = number_of_bytes - 1
-
-		while current_byte > 0:
-			if self._read_bit():
-				current_byte -= 1
-			else:
-				# Read the rest of the bytes
-				read = bytes(number_of_bytes - current_byte - 1) + self._read_bytes(current_byte + 1)
-				return cast(int, arg_type.unpack(read)[0])
-
-		# All but the first bytes are 0. If the upper half of the last byte is a 0 (positive) or 16 (negative) then what we read will be a 1 and the remaining 4 bits.
-		# Otherwise we read a 0 and the 8 bits
-		if self._read_bit():
-			start = bytes([self.read_bits(4)])
-		else:
-			start = self._read_bytes(1)
-		read = start + bytes(number_of_bytes - current_byte - 1)
-		return cast(int, arg_type.unpack(read)[0])
+	def read_compressed(self, arg_type: Type[IntStruct]) -> int:
+		return arg_type.deserialize_compressed(self)
 
 	def read_remaining(self) -> bytes:
 		return self._read_bytes(len(self._data) - int(math.ceil(self._read_offset / 8)))
@@ -262,6 +289,10 @@ class WriteStream(SupportsBytes):
 		pass
 
 	@overload
+	def write(self, arg: _Struct) -> None:
+		pass
+
+	@overload
 	def write(self, arg: c_bit) -> None:
 		pass
 
@@ -270,7 +301,7 @@ class WriteStream(SupportsBytes):
 		pass
 
 	@overload
-	def write(self, arg: AnyStr, allocated_length: int=None, length_type: _IntStruct=None) -> None:
+	def write(self, arg: AnyStr, allocated_length: int=None, length_type: Type[UnsignedIntStruct]=None) -> None:
 		pass
 
 	def write(self, arg, allocated_length=None, length_type=None):
@@ -303,7 +334,7 @@ class WriteStream(SupportsBytes):
 
 		raise TypeError(arg)
 
-	def _write_str(self, str_: AnyStr, allocated_length: int=None, length_type: _IntStruct=None) -> None:
+	def _write_str(self, str_: AnyStr, allocated_length: int=None, length_type: Type[UnsignedIntStruct]=None) -> None:
 		# possibly include default encoded length for non-variable-length strings (seems to be 33)
 		if isinstance(str_, str):
 			encoded_str = str_.encode("utf-16-le")
@@ -360,7 +391,15 @@ class WriteStream(SupportsBytes):
 			self._data[self._write_offset//8+1:self._write_offset//8+1+len(byte_arg)] = new[1:]
 		self._write_offset += len(byte_arg)*8
 
+	@overload
+	def write_compressed(self, byte_arg: IntStruct) -> None:
+		pass
+
+	@overload
 	def write_compressed(self, byte_arg: bytes) -> None:
+		pass
+
+	def write_compressed(self, byte_arg) -> None:
 		current_byte = len(byte_arg) - 1
 
 		# Write upper bytes with a single 1
