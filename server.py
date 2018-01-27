@@ -2,6 +2,7 @@ import asyncio
 import logging
 import socket
 import time
+from enum import auto, Enum
 from typing import Any, Callable, cast, Dict, MutableSequence, Set, SupportsBytes, Union
 
 from .bitstream import c_ubyte, c_uint, c_ushort, ReadStream, WriteStream
@@ -9,6 +10,11 @@ from ._reliability import PacketReliability, ReliabilityLayer
 from .messages import Address, Message
 
 log = logging.getLogger(__name__)
+
+class Event(Enum):
+	NetworkInit = auto()
+	Disconnect = auto()
+	UserPacket = auto()
 
 class Server(asyncio.DatagramProtocol):
 	def __init__(self, address: Address, max_connections: int, incoming_password: bytes):
@@ -22,7 +28,7 @@ class Server(asyncio.DatagramProtocol):
 		self._transport: asyncio.DatagramTransport = cast(asyncio.DatagramTransport, None)
 		self._start_time = int(time.perf_counter() * 1000)
 		self._connected: Dict[Address, ReliabilityLayer] = {}
-		self._handlers: Dict[str, MutableSequence[Callable[..., None]]] = {}
+		self._handlers: Dict[Event, MutableSequence[Callable[..., None]]] = {}
 		self.not_console_logged_packets = {"InternalPing", "ConnectedPong"}
 		self.file_logged_packets: Set[str] = set()
 
@@ -35,7 +41,7 @@ class Server(asyncio.DatagramProtocol):
 		loop = asyncio.get_event_loop()
 		await loop.create_datagram_endpoint(lambda: self, local_addr=self._address)
 		self._address = self._transport.get_extra_info("sockname")
-		self._handle("network_init", self._address)
+		self._handle(Event.NetworkInit, self._address)
 
 	# Protocol methods
 
@@ -99,20 +105,14 @@ class Server(asyncio.DatagramProtocol):
 			self._log_packet(data, received=False)
 		self._connected[address].send(data, reliability)
 
-	EVENT_NAMES = "disconnect_or_connection_lost", "network_init", "user_packet"
-
 	# General handler system
-	def add_handler(self, event_name: str, handler: Callable[..., None]) -> None:
-		if event_name not in Server.EVENT_NAMES:
-			raise ValueError("Invalid event name %s", event_name)
-		self._handlers.setdefault(event_name, []).append(handler)
+	def add_handler(self, event: Event, handler: Callable[..., None]) -> None:
+		self._handlers.setdefault(event, []).append(handler)
 
-	def _handle(self, event_name: str, *args: Any) -> None:
-		if event_name not in Server.EVENT_NAMES:
-			raise ValueError("Invalid event name %s", event_name)
-		if event_name not in self._handlers:
+	def _handle(self, event: Event, *args: Any) -> None:
+		if event not in self._handlers:
 			return
-		for handler in self._handlers[event_name]:
+		for handler in self._handlers[event]:
 			handler(*args)
 
 	# Packet handler stuff
@@ -151,7 +151,7 @@ class Server(asyncio.DatagramProtocol):
 		elif message_id in (Message.DisconnectionNotification, Message.ConnectionLost):
 			self._on_disconnect_or_connection_lost(address)
 		elif message_id == Message.UserPacket:
-			self._handle("user_packet", data, address)
+			self._handle(Event.UserPacket, data, address)
 
 	# Packet callbacks
 
@@ -195,4 +195,4 @@ class Server(asyncio.DatagramProtocol):
 		log.info("Disconnect/Connection lost to %s", address)
 		self._connected[address].stop = True
 		del self._connected[address]
-		self._handle("disconnect_or_connection_lost", address)
+		self._handle(Event.Disconnect, address)

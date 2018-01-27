@@ -9,7 +9,7 @@ from typing import Dict, Iterable, Set
 
 from .bitstream import c_bit, c_ubyte, c_ushort, WriteStream
 from .messages import Address, Message
-from .server import Server
+from .server import Event, Server
 
 log = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ class ReplicaManager:
 
 	def __init__(self, server: Server):
 		self._server = server
-		self._server.add_handler("disconnect_or_connection_lost", self._on_disconnect_or_connection_lost)
+		self._server.add_handler(Event.Disconnect, self._on_disconnect_or_connection_lost)
 		self._participants: Set[Address] = set()
 		self._network_ids: Dict[Replica, int] = {}
 		self._current_network_id = 0
