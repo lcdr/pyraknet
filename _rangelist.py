@@ -20,7 +20,7 @@ class RangeList(Collection[int], Serializable):
 		Ranges in the internal representation are inclusive from both ends (that is, (20, 25) contains both 20 and 25 and everything in between)
 	"""
 
-	def __init__(self):
+	def __init__(self) -> None:
 		self._ranges: List[_Range] = []
 
 	def __bool__(self) -> bool:

@@ -86,7 +86,7 @@ class Server(asyncio.DatagramProtocol):
 		else:
 			log.error("Tried closing connection to someone we are not connected to! (Todo: Implement the router)")
 
-	def send(self, data: Union[bytes, SupportsBytes], address: Address=None, broadcast: bool=False, reliability: int=PacketReliability.ReliableOrdered) -> None:
+	def send(self, data: Union[bytes, SupportsBytes], address: Address=None, broadcast: bool=False, reliability: PacketReliability=PacketReliability.ReliableOrdered) -> None:
 		assert reliability != PacketReliability.ReliableSequenced  # If you need this one, tell me
 		data = bytes(data)
 		if broadcast:

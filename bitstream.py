@@ -6,7 +6,7 @@ Also includes objects for converting datatypes from/to bytes, similar to the sta
 import math
 import struct
 from abc import ABC, abstractmethod
-from typing import AnyStr, ByteString, cast, ClassVar, Generic, overload, SupportsBytes, Type, TypeVar
+from typing import AnyStr, ByteString, cast, Generic, overload, SupportsBytes, Type, TypeVar
 
 T = TypeVar('T')
 
@@ -273,7 +273,7 @@ class WriteStream(SupportsBytes):
 	"""Allows simple sequential writing to bytes."""
 	_data: bytearray
 
-	def __init__(self):
+	def __init__(self) -> None:
 		self._data = bytearray()
 		self._write_offset = 0
 		self._was_cast_to_bytes = False
