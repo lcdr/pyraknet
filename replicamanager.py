@@ -4,7 +4,6 @@ See RakNet's ReplicaManager.
 """
 
 import logging
-from abc import ABC, abstractmethod
 from typing import Dict, Iterable, Set
 
 from .bitstream import c_bit, c_ubyte, c_ushort, WriteStream
@@ -13,16 +12,14 @@ from .server import Event, Server
 
 log = logging.getLogger(__name__)
 
-class Replica(ABC):
+class Replica:
 	"""Abstract base class for replicas (objects serialized using the replica manager system)."""
 
-	@abstractmethod
 	def write_construction(self, stream: WriteStream) -> None:
 		"""
 		This is where the object should write data to be sent on construction.
 		"""
 
-	@abstractmethod
 	def serialize(self, stream: WriteStream) -> None:
 		"""
 		This is where the object should write data to be sent on serialization.
@@ -54,7 +51,7 @@ class ReplicaManager:
 		"""
 		self._participants.add(address)
 		for obj in self._network_ids:
-			self._construct(obj, new=False, recipients=(address,))
+			self._construct(obj, new=False, recipients=[address])
 
 	def construct(self, obj: Replica, new: bool=True) -> None:
 		"""
@@ -80,8 +77,7 @@ class ReplicaManager:
 		out.write(c_ushort(self._network_ids[obj]))
 		obj.write_construction(out)
 
-		for recipient in recipients:
-			self._server.send(out, recipient)
+		self._server.send(out, recipients)
 
 	def serialize(self, obj: Replica) -> None:
 		"""
@@ -95,8 +91,7 @@ class ReplicaManager:
 		out.write(c_ushort(self._network_ids[obj]))
 		obj.serialize(out)
 
-		for participant in self._participants:
-			self._server.send(out, participant)
+		self._server.send(out, self._participants)
 
 	def destruct(self, obj: Replica) -> None:
 		"""

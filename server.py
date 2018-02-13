@@ -3,7 +3,7 @@ import logging
 import socket
 import time
 from enum import auto, Enum
-from typing import Any, Callable, cast, Dict, MutableSequence, Set, SupportsBytes, Union
+from typing import Any, Callable, cast, Dict, Iterable, MutableSequence, Set, SupportsBytes, Union
 
 from .bitstream import c_ubyte, c_uint, c_ushort, ReadStream, WriteStream
 from ._reliability import PacketReliability, ReliabilityLayer
@@ -86,24 +86,30 @@ class Server(asyncio.DatagramProtocol):
 		else:
 			log.error("Tried closing connection to someone we are not connected to! (Todo: Implement the router)")
 
-	def send(self, data: Union[bytes, SupportsBytes], address: Address=None, broadcast: bool=False, reliability: PacketReliability=PacketReliability.ReliableOrdered) -> None:
+	def send(self, data: Union[bytes, SupportsBytes], recipients: Union[Address, Iterable[Address]]=None, broadcast: bool=False, reliability: PacketReliability=PacketReliability.ReliableOrdered) -> None:
 		assert reliability != PacketReliability.ReliableSequenced  # If you need this one, tell me
-		data = bytes(data)
+		if recipients is None:
+			if broadcast:
+				recs: Iterable[Address] = []
+			else:
+				raise ValueError
+		elif isinstance(recipients, tuple) and len(recipients) == 2 and isinstance(recipients[0], str):
+			recs = [recipients]
+		else:
+			recs = recipients
 		if broadcast:
-			recipients = self._connected.copy()
-			if address is not None:
-				del recipients[address]
-			for recipient in recipients:
-				self.send(data, recipient, False, reliability)
-			return
-		if address is None:
-			raise ValueError
-		if address not in self._connected:
-			log.error("Tried sending %s to %s but we are not connected!" % (data, address))
-			return
+			all_recs = list(self._connected)
+			for excluded in recs:
+				all_recs.remove(excluded)
+			recs = all_recs
+
+		data = bytes(data)
 		if data[0] != Message.UserPacket:
 			self._log_packet(data, received=False)
-		self._connected[address].send(data, reliability)
+		for recipient in recs:
+			if recipient not in self._connected:
+				log.error("Tried sending %s to %s but we are not connected!" % (data, recipient))
+			self._connected[recipient].send(data, reliability)
 
 	# General handler system
 	def add_handler(self, event: Event, handler: Callable[..., None]) -> None:
