@@ -114,7 +114,7 @@ class Serializable(ABC):
 
 	@classmethod
 	@abstractmethod
-	def deserialize(self, stream: "ReadStream") -> "Serializable":
+	def deserialize(cls, stream: "ReadStream") -> "Serializable":
 		"""Create a new object from the bitstream."""
 		pass
 
