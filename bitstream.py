@@ -112,9 +112,9 @@ class Serializable(ABC):
 		"""Write this object to the bitstream."""
 		pass
 
-	@staticmethod
+	@classmethod
 	@abstractmethod
-	def deserialize(stream: "ReadStream") -> "Serializable":
+	def deserialize(self, stream: "ReadStream") -> "Serializable":
 		"""Create a new object from the bitstream."""
 		pass
 
