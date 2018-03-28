@@ -19,11 +19,13 @@ class Replica:
 		"""
 		This is where the object should write data to be sent on construction.
 		"""
+		raise NotImplementedError
 
 	def serialize(self, stream: WriteStream) -> None:
 		"""
 		This is where the object should write data to be sent on serialization.
 		"""
+		raise NotImplementedError
 
 	def on_destruction(self) -> None:
 		"""

@@ -24,6 +24,9 @@ class _Struct(Generic[T]):
 		return cast(T, cls._struct.unpack(stream.read(bytes, length=cls._struct.size))[0])
 
 class IntStruct(_Struct[int]):
+	pass
+
+class UnsignedIntStruct(IntStruct):
 	@classmethod
 	def deserialize_compressed(cls, stream: "ReadStream") -> int:
 		number_of_bytes = cls._struct.size
@@ -34,7 +37,7 @@ class IntStruct(_Struct[int]):
 				current_byte -= 1
 			else:
 				# Read the rest of the bytes
-				read = bytes(number_of_bytes - current_byte - 1) + stream.read(bytes, length=current_byte + 1)
+				read = stream.read(bytes, length=current_byte + 1) + bytes(number_of_bytes - current_byte - 1)
 				return cast(int, cls._struct.unpack(read)[0])
 
 		# All but the first bytes are 0. If the upper half of the last byte is a 0 (positive) or 16 (negative) then what we read will be a 1 and the remaining 4 bits.
@@ -45,9 +48,6 @@ class IntStruct(_Struct[int]):
 			start = stream.read(bytes, length=1)
 		read = start + bytes(number_of_bytes - current_byte - 1)
 		return cast(int, cls._struct.unpack(read)[0])
-
-class UnsignedIntStruct(IntStruct):
-	pass
 
 class SignedIntStruct(IntStruct):
 	pass
@@ -253,7 +253,7 @@ class ReadStream:
 		self._read_offset += length * 8
 		return output
 
-	def read_compressed(self, arg_type: Type[IntStruct]) -> int:
+	def read_compressed(self, arg_type: Type[UnsignedIntStruct]) -> int:
 		return arg_type.deserialize_compressed(self)
 
 	def read_remaining(self) -> bytes:
@@ -310,15 +310,6 @@ class WriteStream(SupportsBytes):
 		allocated_length is for fixed-length strings.
 		length_type is for variable-length strings.
 		"""
-		if isinstance(arg, WriteStream):
-			self._write_bytes(arg._data)
-			if arg._write_offset % 8 != 0:
-				# this should work assuming the part after the arg's write offset is completely 0
-				self._write_offset -= 8 - arg._write_offset % 8
-				# in some cases it's possible we've written an unnecessary byte
-				if self._write_offset//8 == len(self._data)-2:
-					del self._data[-1]
-			return
 		if isinstance(arg, c_bit):
 			self._write_bit(arg.value)
 			return
@@ -392,7 +383,7 @@ class WriteStream(SupportsBytes):
 		self._write_offset += len(byte_arg)*8
 
 	@overload
-	def write_compressed(self, byte_arg: IntStruct) -> None:
+	def write_compressed(self, byte_arg: UnsignedIntStruct) -> None:
 		pass
 
 	@overload
