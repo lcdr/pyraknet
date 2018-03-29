@@ -40,6 +40,14 @@ class RangeListTest(unittest.TestCase):
 		self.list.insert(1)
 		self.assertTrue(self.list)
 
+	def test_contains_false(self):
+		self.assertFalse("test" in self.list)
+		self.assertFalse(1 in self.list)
+
+	def test_contains_true(self):
+		self.list.insert(1)
+		self.assertTrue(1 in self.list)
+
 	def test_insert_duplicate(self):
 		values = [1, 1, 2, 2, 3, 3]
 		for value in values:
