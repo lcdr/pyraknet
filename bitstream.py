@@ -132,13 +132,13 @@ class ReadStream:
 	@property
 	def read_offset(self) -> int:
 		if not self._unlocked:
-			raise RuntimeError
+			raise RuntimeError("access to read offset on locked stream")
 		return self._read_offset
 
 	@read_offset.setter
 	def read_offset(self, value: int) -> None:
 		if not self._unlocked:
-			raise RuntimeError
+			raise RuntimeError("access to read offset on locked stream")
 		self._read_offset = value
 
 	def skip_read(self, byte_length: int) -> None:

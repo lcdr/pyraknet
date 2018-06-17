@@ -108,8 +108,7 @@ class ReplicaManager:
 		out.write(c_ubyte(Message.ReplicaManagerDestruction))
 		out.write(c_ushort(self._network_ids[obj]))
 
-		for participant in self._participants:
-			self._server.send(out, participant)
+		self._server.send(out, self._participants)
 
 		del self._network_ids[obj]
 

@@ -2,7 +2,7 @@
 ## A Python implementation of RakNet 3.25.
 ### Created by lcdr
 ### Source repository at https://bitbucket.org/lcdr/pyraknet/
-### License: GPL v3
+### License: [AGPL v3](https://www.gnu.org/licenses/agpl-3.0.html)
 
 
 This is not aimed to be a complete port of RakNet, just everything that's needed to run a server.
