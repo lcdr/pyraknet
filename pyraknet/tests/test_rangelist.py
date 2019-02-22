@@ -1,7 +1,7 @@
 import random
 import unittest
 
-from pyraknet._rangelist import RangeList, ReadStream, WriteStream
+from pyraknet.transports.raknet._rangelist import RangeList, ReadStream, WriteStream
 
 class _BitStream(WriteStream, ReadStream):
 	def __init__(self):

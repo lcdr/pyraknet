@@ -1,9 +1,9 @@
-from enum import IntEnum
+from enum import Enum
 from typing import Tuple
 
 Address = Tuple[str, int]
 
-class Message(IntEnum):
+class Message(Enum):
 	InternalPing = 0x00
 	Ping = 0x01
 	PingOpenConnections = 0x02

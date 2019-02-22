@@ -6,9 +6,13 @@ See RakNet's ReplicaManager.
 import logging
 from typing import Dict, Iterable, Set
 
-from .bitstream import c_bit, c_ubyte, c_ushort, WriteStream
-from .messages import Address, Message
-from .server import Event, Server
+from bitstream import c_bit, c_ubyte, c_ushort, WriteStream
+
+from .messages import Message
+from .server import Server
+from .transports.abc import Connection, ConnectionEvent
+
+from event_dispatcher import EventDispatcher
 
 log = logging.getLogger(__name__)
 
@@ -37,23 +41,23 @@ class ReplicaManager:
 	Handles broadcasting updates of objects to connected players.
 	"""
 
-	def __init__(self, server: Server):
-		self._server = server
-		self._server.add_handler(Event.Disconnect, self._on_disconnect_or_connection_lost)
-		self._participants: Set[Address] = set()
+	def __init__(self, dispatcher: EventDispatcher):
+		self._dispatcher = dispatcher
+		self._dispatcher.add_listener(ConnectionEvent.Close, self._on_conn_close)
+		self._participants: Set[Connection] = set()
 		self._network_ids: Dict[Replica, int] = {}
 		self._current_network_id = 0
 
-	def add_participant(self, address: Address) -> None:
+	def add_participant(self, conn: Connection) -> None:
 		"""
 		Add a participant to which object updates will be broadcast to.
 		Updates won't automatically be sent to all connected players, just the ones added via this method.
 		Disconnected players will automatically be removed from the list when they disconnect.
 		Newly added players will receive construction messages for all objects are currently registered with the manager (construct has been called and destruct hasn't been called yet).
 		"""
-		self._participants.add(address)
+		self._participants.add(conn)
 		for obj in self._network_ids:
-			self._construct(obj, new=False, recipients=[address])
+			self._construct(obj, new=False, recipients=[conn])
 
 	def construct(self, obj: Replica, new: bool=True) -> None:
 		"""
@@ -64,7 +68,7 @@ class ReplicaManager:
 		"""
 		self._construct(obj, new)
 
-	def _construct(self, obj: Replica, new: bool=True, recipients: Iterable[Address]=None) -> None:
+	def _construct(self, obj: Replica, new: bool=True, recipients: Iterable[Connection]=None) -> None:
 		# recipients is needed to send replicas to new participants
 		if recipients is None:
 			recipients = self._participants
@@ -74,12 +78,14 @@ class ReplicaManager:
 			self._current_network_id += 1
 
 		out = WriteStream()
-		out.write(c_ubyte(Message.ReplicaManagerConstruction))
+		out.write(c_ubyte(Message.ReplicaManagerConstruction.value))
 		out.write(c_bit(True))
 		out.write(c_ushort(self._network_ids[obj]))
 		obj.write_construction(out)
 
-		self._server.send(out, recipients)
+		out = bytes(out)
+		for conn in recipients:
+			conn.send(out)
 
 	def serialize(self, obj: Replica) -> None:
 		"""
@@ -89,11 +95,13 @@ class ReplicaManager:
 		Note that the manager does not automatically send a serialization message when some part of your object changes - you have to call this function explicitly.
 		"""
 		out = WriteStream()
-		out.write(c_ubyte(Message.ReplicaManagerSerialize))
+		out.write(c_ubyte(Message.ReplicaManagerSerialize.value))
 		out.write(c_ushort(self._network_ids[obj]))
 		obj.serialize(out)
 
-		self._server.send(out, self._participants)
+		out = bytes(out)
+		for conn in self._participants:
+			conn.send(out)
 
 	def destruct(self, obj: Replica) -> None:
 		"""
@@ -105,12 +113,14 @@ class ReplicaManager:
 		log.debug("destructing %s", obj)
 		obj.on_destruction()
 		out = WriteStream()
-		out.write(c_ubyte(Message.ReplicaManagerDestruction))
+		out.write(c_ubyte(Message.ReplicaManagerDestruction.value))
 		out.write(c_ushort(self._network_ids[obj]))
 
-		self._server.send(out, self._participants)
+		out = bytes(out)
+		for conn in self._participants:
+			conn.send(out)
 
 		del self._network_ids[obj]
 
-	def _on_disconnect_or_connection_lost(self, address: Address) -> None:
-		self._participants.discard(address)
+	def _on_conn_close(self, conn: Connection) -> None:
+		self._participants.discard(conn)
