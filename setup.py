@@ -2,7 +2,7 @@ import os.path
 
 from setuptools import find_packages, setup
 
-with open(os.path.join(__file__, "..", "README.md")) as file:
+with open(os.path.join(os.path.dirname(__file__), "README.md")) as file:
 	long_desc = file.read()
 
 setup(
