@@ -37,8 +37,8 @@ class Server:
 
 		self._start_time = int(time.perf_counter() * 1000)
 
-		if port != 0:
-			tcp_udp_port = port + 1
+		if port == 1001:
+			tcp_udp_port = 21836
 		else:
 			tcp_udp_port = 0
 		TCPUDPTransport((host, tcp_udp_port), max_connections, self._dispatcher, ssl)
