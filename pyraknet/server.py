@@ -39,6 +39,8 @@ class Server:
 
 		if port == 1001:
 			tcp_udp_port = 21836
+		elif port != 0:
+			tcp_udp_port = port + 1
 		else:
 			tcp_udp_port = 0
 		TCPUDPTransport((host, tcp_udp_port), max_connections, self._dispatcher, ssl)
