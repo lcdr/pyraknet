@@ -1,6 +1,6 @@
 import asyncio
 from ssl import SSLContext
-from typing import Optional, SupportsBytes
+from typing import cast, Optional, SupportsBytes
 
 from bitstream import c_uint, c_ushort
 from event_dispatcher import EventDispatcher
@@ -14,7 +14,8 @@ class TCPUDPConnection(Connection, asyncio.Protocol):
 		self._transport = transport
 		self._tcp = None
 		self._remote_addr = None
-		self._seq_num = 0
+		self._in_seq_num = 0
+		self._out_seq_num = 0
 		self._packet_len = 0
 		self._packet = bytearray()
 
@@ -43,9 +44,10 @@ class TCPUDPConnection(Connection, asyncio.Protocol):
 				offset += len(packet)
 				self._packet.extend(packet)
 				if len(self._packet) == self._packet_len:
-					self._dispatcher.dispatch(ConnectionEvent.Receive, self._packet, self)
+					packet = self._packet
 					self._packet_len = 0
 					self._packet = bytearray()
+					self._dispatcher.dispatch(ConnectionEvent.Receive, packet, self)
 
 	# UDP
 
@@ -54,8 +56,8 @@ class TCPUDPConnection(Connection, asyncio.Protocol):
 			self._dispatcher.dispatch(ConnectionEvent.Receive, data[1:], self)
 		elif data[0] == 1: # unreliable sequenced
 			seq_num = c_uint._struct.unpack(data[1:5])[0]
-			if seq_num >= self._seq_num:
-				self._seq_num = seq_num
+			if seq_num >= self._in_seq_num:
+				self._in_seq_num = seq_num
 				self._dispatcher.dispatch(ConnectionEvent.Receive, data[5:], self)
 
 	def get_address(self) -> Address:
@@ -65,13 +67,22 @@ class TCPUDPConnection(Connection, asyncio.Protocol):
 		return ConnectionType.TcpUdp
 
 	def close(self) -> None:
+		self._dispatcher.dispatch(ConnectionEvent.Close, self)
 		if self._remote_addr in self._transport._conns:
 			del self._transport._conns[self._remote_addr]
 		self._tcp.close()
 
 	def _send(self, data: bytes, reliability: Reliability) -> None:
-		self._tcp.write(c_uint._struct.pack(len(data)))
-		self._tcp.write(data)
+		if reliability == Reliability.Unreliable:
+			self._transport.udp.sendto(b"\0"+data, self._remote_addr)
+		elif reliability == Reliability.UnreliableSequenced:
+			seq_num = self._out_seq_num
+			self._out_seq_num = (self._out_seq_num + 1) & 0xff_ff_ff_ff
+			seq_num = c_uint._struct.pack(seq_num)[0]
+			self._transport.udp.sendto(b"\1"+data, self._remote_addr)
+		else:
+			self._tcp.write(c_uint._struct.pack(len(data)))
+			self._tcp.write(data)
 
 class TCPUDPTransport(asyncio.DatagramProtocol):
 	def __init__(self, listen_addr: Address, max_connections: int, dispatcher: EventDispatcher, ssl: Optional[SSLContext]):
@@ -86,6 +97,9 @@ class TCPUDPTransport(asyncio.DatagramProtocol):
 		listen_addr = server.sockets[0].getsockname()
 		await loop.create_datagram_endpoint(lambda: self, local_addr=listen_addr)
 		self._dispatcher.dispatch(TransportEvent.NetworkInit, ConnectionType.TcpUdp, listen_addr)
+
+	def connection_made(self, transport: asyncio.BaseTransport) -> None:
+		self.udp = cast(asyncio.DatagramTransport, transport)
 
 	def datagram_received(self, data: bytes, address: Address) -> None:
 		if address in self._conns:
