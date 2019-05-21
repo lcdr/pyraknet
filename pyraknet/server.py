@@ -81,7 +81,5 @@ class Server:
 		pong = WriteStream()
 		pong.write(c_ubyte(Message.ConnectedPong.value))
 		pong.write(c_uint(ping_send_time))
-		pong.write(c_uint(int(time.perf_counter() * 1000) - self._start_time))
-		# not sure why this isn't working, todo: find out
-		#conn.send(pong, reliability=Reliability.Unreliable)
+		pong.write(c_uint(int(0)))
 		conn.send(pong)
