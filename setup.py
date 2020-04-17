@@ -11,7 +11,7 @@ setup(
 	description="Minimal Python implementation of RakNet 3.25.",
 	long_description=long_desc,
 	author="lcdr",
-	url="https://bitbucket.org/lcdr/pyraknet/",
+	url="https://github.com/lcdr/pyraknet/",
 	license="GPL v3",
 	packages=find_packages(),
 	python_requires=">=3.6",
